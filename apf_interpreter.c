@@ -31,30 +31,26 @@
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-/**
- * Runs a packet filtering program over a packet.
- *
- * @param program the program bytecode.
- * @param program_len the length of {@code apf_program} in bytes.
- * @param packet the packet bytes, starting from the 802.3 header and not
- *               including any CRC bytes at the end.
- * @param packet_len the length of {@code packet} in bytes.
- * @param filter_age the number of seconds since the filter was programmed.
- *
- * @return non-zero if packet should be passed to AP, zero if
- *         packet should be dropped.
- */
 int accept_packet(const uint8_t* program, uint32_t program_len,
                   const uint8_t* packet, uint32_t packet_len,
+                  uint8_t* data, uint32_t data_len,
                   uint32_t filter_age) {
 // Is offset within program bounds?
 #define IN_PROGRAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < program_len)
 // Is offset within packet bounds?
 #define IN_PACKET_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < packet_len)
+// Is access to offset |p| length |size| within data bounds?
+#define IN_DATA_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
+                                 ENFORCE_UNSIGNED(size) && \
+                                 (p) + (size) <= data_len && \
+                                 (p) + (size) >= (p))  // catch wraparounds
 // Accept packet if not within program bounds
 #define ASSERT_IN_PROGRAM_BOUNDS(p) ASSERT_RETURN(IN_PROGRAM_BOUNDS(p))
 // Accept packet if not within packet bounds
 #define ASSERT_IN_PACKET_BOUNDS(p) ASSERT_RETURN(IN_PACKET_BOUNDS(p))
+// Accept packet if not within data bounds
+#define ASSERT_IN_DATA_BOUNDS(p, size) ASSERT_RETURN(IN_DATA_BOUNDS(p, size))
+
   // Program counter.
   uint32_t pc = 0;
 // Accept packet if not within program or not ahead of program counter
@@ -268,6 +264,27 @@ int accept_packet(const uint8_t* program, uint32_t program_len,
                     return PASS_PACKET;
               }
               break;
+          case LDDW_OPCODE: {
+              uint32_t offs = imm + OTHER_REG;
+              uint32_t size = 4;
+              uint32_t val = 0;
+              ASSERT_IN_DATA_BOUNDS(offs, size);
+              while (size--)
+                  val = (val << 8) | data[offs++];
+              REG = val;
+              break;
+          }
+          case STDW_OPCODE: {
+              uint32_t offs = imm + OTHER_REG;
+              uint32_t size = 4;
+              uint32_t val = REG;
+              ASSERT_IN_DATA_BOUNDS(offs, size);
+              while (size--) {
+                  data[offs++] = (val >> 24);
+                  val <<= 8;
+              }
+              break;
+          }
           // Unknown opcode
           default:
               // Bail out

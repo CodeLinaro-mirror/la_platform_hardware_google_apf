@@ -27,7 +27,7 @@ extern "C" {
  * Version of APF instruction set processed by accept_packet().
  * Should be returned by wifi_get_packet_filter_info.
  */
-#define APF_VERSION 2
+#define APF_VERSION 3
 
 /**
  * Runs a packet filtering program over a packet.
@@ -37,6 +37,8 @@ extern "C" {
  * @param packet the packet bytes, starting from the 802.3 header and not
  *               including any CRC bytes at the end.
  * @param packet_len the length of {@code packet} in bytes.
+ * @param data writable data memory region (preserved between packets).
+ * @param data_len the length of {@code data} in bytes.
  * @param filter_age the number of seconds since the filter was programmed.
  *
  * @return non-zero if packet should be passed to AP, zero if
@@ -44,6 +46,7 @@ extern "C" {
  */
 int accept_packet(const uint8_t* program, uint32_t program_len,
                   const uint8_t* packet, uint32_t packet_len,
+                  uint8_t* data, uint32_t data_len,
                   uint32_t filter_age);
 
 #ifdef __cplusplus
