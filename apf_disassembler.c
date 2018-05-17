@@ -211,7 +211,7 @@ int main(void) {
           case LDDW_OPCODE:
           case STDW_OPCODE:
               PRINT_OPCODE();
-              printf("r%u, [%u+r%u]", reg_num, imm, reg_num ^ 1);
+              printf("r%u, [%d+r%u]", reg_num, signed_imm, reg_num ^ 1);
               break;
 
           // Unknown opcode

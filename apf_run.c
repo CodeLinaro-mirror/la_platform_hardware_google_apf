@@ -74,14 +74,22 @@ int main(int argc, char* argv[]) {
     uint8_t* data = NULL;
     uint32_t data_len = argc > 3 ? parse_hex(argv[3], &data) : 0;
     uint32_t filter_age = argc > 4 ? atoi(argv[4]) : 0;
-    int ret = accept_packet(program, program_len, packet, packet_len,
-                            data, data_len, filter_age);
-    printf("Packet %sed\n", ret ? "pass" : "dropp");
+
+    // Combine the program and data into the unified APF buffer.
     if (data) {
-        printf("Data: ");
-        print_hex(data, data_len);
-        printf("\n");
+        program = realloc(program, program_len + data_len);
+        memcpy(program + program_len, data, data_len);
         free(data);
+    }
+
+    uint32_t ram_len = program_len + data_len;
+    int ret = accept_packet(program, program_len, ram_len, packet, packet_len,
+                            filter_age);
+    printf("Packet %sed\n", ret ? "pass" : "dropp");
+    if (data_len) {
+        printf("Data: ");
+        print_hex(program + program_len, data_len);
+        printf("\n");
     }
     free(program);
     free(packet);
