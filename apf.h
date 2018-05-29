@@ -1,5 +1,5 @@
 /*
- * Copyright 2016, The Android Open Source Project
+ * Copyright 2018, The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#ifndef ANDROID_APF_APF_H
+#define ANDROID_APF_APF_H
 
 // A brief overview of APF:
 //
@@ -83,6 +86,8 @@
 //    When the APF program begins execution, three of the sixteen memory slots
 //    are pre-filled by the interpreter with values that may be useful for
 //    programs:
+//      Slot #11 contains the size (in bytes) of the APF program.
+//      Slot #12 contains the total size of the APF buffer (program + data).
 //      Slot #13 is filled with the IPv4 header length. This value is calculated
 //               by loading the first byte of the IPv4 header and taking the
 //               bottom 4 bits and multiplying their value by 4. This value is
@@ -91,7 +96,7 @@
 //      Slot #14 is filled with size of the packet in bytes, including the
 //               link-layer header if any.
 //      Slot #15 is filled with the filter age in seconds. This is the number of
-//               seconds since the AP send the program to the chipset. This may
+//               seconds since the AP sent the program to the chipset. This may
 //               be used by filters that should have a particular lifetime. For
 //               example, it can be used to rate-limit particular packets to one
 //               every N seconds.
@@ -119,6 +124,8 @@
 // Number of temporary memory slots, see ldm/stm instructions.
 #define MEMORY_ITEMS 16
 // Upon program execution, some temporary memory slots are prefilled:
+#define MEMORY_OFFSET_PROGRAM_SIZE 11     // Size of program (in bytes)
+#define MEMORY_OFFSET_DATA_SIZE 12        // Total size of program + data
 #define MEMORY_OFFSET_IPV4_HEADER_SIZE 13 // 4*([APF_FRAME_HEADER_SIZE]&15)
 #define MEMORY_OFFSET_PACKET_SIZE 14      // Size of packet in bytes.
 #define MEMORY_OFFSET_FILTER_AGE 15       // Age since filter installed in seconds.
@@ -136,7 +143,7 @@
 #define AND_OPCODE 10   // And, e.g. "and R0,5"
 #define OR_OPCODE 11    // Or, e.g. "or R0,5"
 #define SH_OPCODE 12    // Left shift, e.g, "sh R0, 5" or "sh R0, -5" (shifts right)
-#define LI_OPCODE 13    // Load immediate, e.g. "li R0,5" (immediate encoded as signed value)
+#define LI_OPCODE 13    // Load signed immediate, e.g. "li R0,5"
 #define JMP_OPCODE 14   // Unconditional jump, e.g. "jmp label"
 #define JEQ_OPCODE 15   // Compare equal and branch, e.g. "jeq R0,5,label"
 #define JNE_OPCODE 16   // Compare not equal and branch, e.g. "jne R0,5,label"
@@ -145,8 +152,8 @@
 #define JSET_OPCODE 19  // Compare any bits set and branch, e.g. "jset R0,5,label"
 #define JNEBS_OPCODE 20 // Compare not equal byte sequence, e.g. "jnebs R0,5,label,0x1122334455"
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
-#define LDDW_OPCODE 22  // Load 4 bytes from data address (register + imm): "lddw R0, [5+R1]"
-#define STDW_OPCODE 23  // Store 4 bytes to data address (register + imm): "stdw R0, [5+R1]"
+#define LDDW_OPCODE 22  // Load 4 bytes from data address (register + simm): "lddw R0, [5+R1]"
+#define STDW_OPCODE 23  // Store 4 bytes to data address (register + simm): "stdw R0, [5+R1]"
 
 // Extended opcodes. These all have an opcode of EXT_OPCODE
 // and specify the actual opcode in the immediate field.
@@ -162,3 +169,5 @@
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
 #define EXTRACT_IMM_LENGTH(i) (((i) >> 1) & 3)
+
+#endif  // ANDROID_APF_APF_H
