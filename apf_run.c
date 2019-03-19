@@ -18,6 +18,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <inttypes.h>
 #include <libgen.h>
 #include <limits.h>
 #include <pcap.h>
@@ -29,22 +30,22 @@
 #include "apf_interpreter.h"
 
 enum {
-  OPT_PROGRAM,
-  OPT_PACKET,
-  OPT_PCAP,
-  OPT_DATA,
-  OPT_AGE
+    OPT_PROGRAM,
+    OPT_PACKET,
+    OPT_PCAP,
+    OPT_DATA,
+    OPT_AGE,
+    OPT_TRACE,
 };
 
-const struct option long_options[] = {
-  {"program", 1, NULL, OPT_PROGRAM},
-  {"packet", 1, NULL, OPT_PACKET},
-  {"pcap", 1, NULL, OPT_PCAP},
-  {"data", 1, NULL, OPT_DATA},
-  {"age", 1, NULL, OPT_AGE},
-  {"help", 0, NULL, 'h'},
-  {NULL, 0, NULL, 0}
-};
+const struct option long_options[] = {{"program", 1, NULL, OPT_PROGRAM},
+                                      {"packet", 1, NULL, OPT_PACKET},
+                                      {"pcap", 1, NULL, OPT_PCAP},
+                                      {"data", 1, NULL, OPT_DATA},
+                                      {"age", 1, NULL, OPT_AGE},
+                                      {"trace", 0, NULL, OPT_TRACE},
+                                      {"help", 0, NULL, 'h'},
+                                      {NULL, 0, NULL, 0}};
 
 // Parses hex in "input". Allocates and fills "*output" with parsed bytes.
 // Returns length in bytes of "*output".
@@ -91,9 +92,21 @@ void packet_handler(uint8_t* program, uint32_t program_len, uint32_t ram_len,
     free(packet);
 }
 
+int tracing_enabled = 0;
+void apf_trace_hook(uint32_t pc, const uint32_t* regs, const uint8_t* program,
+                    const uint8_t* packet, const uint32_t* memory) {
+    if (!tracing_enabled) return;
+
+    // TODO: disassemble opcodes and dump memory locations
+    (void)program;
+    (void)packet;
+    (void)memory;
+    printf("PC:%8u R0:%8" PRIx32 " R1:%8" PRIx32 "\n", pc, regs[0], regs[1]);
+}
+
 // Process pcap file through APF filter and generate output files
-void file_handler(uint8_t* program, uint32_t program_len, uint32_t ram_len,
-                 char* filename, uint32_t filter_age){
+void file_handler(uint8_t* program, uint32_t program_len, uint32_t ram_len, const char* filename,
+                  uint32_t filter_age) {
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *pcap;
     struct pcap_pkthdr apf_header;
@@ -142,12 +155,13 @@ void file_handler(uint8_t* program, uint32_t program_len, uint32_t ram_len,
 void print_usage(char* cmd) {
     fprintf(stderr,
             "Usage: %s --program <program> --pcap <file>|--packet <packet> "
-            "[--data <content>] [--age <number>]\n"
+            "[--data <content>] [--age <number>] [--trace]\n"
             "  --program    APF program, in hex.\n"
             "  --pcap       Pcap file to run through program.\n"
             "  --packet     Packet to run through program.\n"
             "  --data       Data memory contents, in hex.\n"
             "  --age        Age of program in seconds (default: 0).\n"
+            "  --trace      Enable APF interpreter debug tracing\n"
             "  -h, --help   Show this message.\n",
             basename(cmd));
 }
@@ -160,7 +174,7 @@ int main(int argc, char* argv[]) {
 
     uint8_t* program = NULL;
     uint32_t program_len;
-    char *filename = NULL;
+    const char* filename = NULL;
     char* packet = NULL;
     uint8_t* data = NULL;
     uint32_t data_len = 0;
@@ -172,53 +186,56 @@ int main(int argc, char* argv[]) {
     while ((opt = getopt_long_only(argc, argv, "h", long_options, NULL)) != -1) {
         switch (opt) {
             case OPT_PROGRAM:
-                    program_len = parse_hex(optarg, &program);
-                    break;
+                program_len = parse_hex(optarg, &program);
+                break;
             case OPT_PACKET:
-                    if (!program) {
-                        printf("<packet> requires <program> first\n\'%s -h or --help\' "
-                               "for more information\n", basename(argv[0]));
-                        exit(1);
-                    }
-                    if (filename) {
-                        printf("Cannot use <file> with <packet> \n\'%s -h or --help\' "
-                               "for more information\n", basename(argv[0]));
+                if (!program) {
+                    printf("<packet> requires <program> first\n\'%s -h or --help\' "
+                           "for more information\n", basename(argv[0]));
+                    exit(1);
+                }
+                if (filename) {
+                    printf("Cannot use <file> with <packet> \n\'%s -h or --help\' "
+                           "for more information\n", basename(argv[0]));
 
-                        exit(1);
-                    }
-                    packet = optarg;
-                    break;
+                    exit(1);
+                }
+                packet = optarg;
+                break;
             case OPT_PCAP:
-                    if (!program) {
-                        printf("<file> requires <program> first\n\'%s -h or --help\' "
-                               "for more information\n", basename(argv[0]));
+                if (!program) {
+                    printf("<file> requires <program> first\n\'%s -h or --help\' "
+                           "for more information\n", basename(argv[0]));
 
-                        exit(1);
-                    }
-                    if (packet) {
-                        printf("Cannot use <packet> with <file>\n\'%s -h or --help\' "
-                               "for more information\n", basename(argv[0]));
+                    exit(1);
+                }
+                if (packet) {
+                    printf("Cannot use <packet> with <file>\n\'%s -h or --help\' "
+                           "for more information\n", basename(argv[0]));
 
-                        exit(1);
-                    }
-                    filename = optarg;
-                    break;
+                    exit(1);
+                }
+                filename = optarg;
+                break;
             case OPT_DATA:
-                    data_len = parse_hex(optarg, &data);
-                    break;
+                data_len = parse_hex(optarg, &data);
+                break;
             case OPT_AGE:
-                    errno = 0;
-                    filter_age = strtoul(optarg, &endptr, 10);
-                    if ((errno == ERANGE && filter_age == ULONG_MAX)
-                        || (errno != 0 && filter_age == 0)) {
-                      perror("Error on age option: strtoul");
-                      exit(1);
-                    }
-                    if (endptr == optarg) {
-                      printf("No digit found in age.\n");
-                      exit(1);
-                    }
-                    break;
+                errno = 0;
+                filter_age = strtoul(optarg, &endptr, 10);
+                if ((errno == ERANGE && filter_age == ULONG_MAX) ||
+                    (errno != 0 && filter_age == 0)) {
+                    perror("Error on age option: strtoul");
+                    exit(1);
+                }
+                if (endptr == optarg) {
+                    printf("No digit found in age.\n");
+                    exit(1);
+                }
+                break;
+            case OPT_TRACE:
+                tracing_enabled = 1;
+                break;
             case 'h':
                 print_usage(argv[0]);
                 exit(0);
@@ -231,8 +248,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (!program) {
-          printf("Must have APF program in option.\n");
-          exit(1);
+        printf("Must have APF program in option.\n");
+        exit(1);
     }
 
     if (!filename && !packet) {
