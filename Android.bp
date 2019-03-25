@@ -33,6 +33,9 @@ cc_binary_host {
         "apf_run.c",
         "apf_interpreter.c",
     ],
+    cflags: [
+        "-DAPF_TRACE_HOOK=apf_trace_hook",
+    ],
     target: {
         darwin: {
             enabled: false,
