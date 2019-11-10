@@ -1,0 +1,26 @@
+      R0       R1       PC  Instruction
+-------------------------------------------------
+       0        0        0: ldh   r0, [12]
+       2     86dd        2: jlt   r0, 0x600, DROP
+       7     86dd        7: jne   r0, 0x806, 64
+      40     86dd       64: jne   r0, 0x800, 141
+      8d     86dd      141: jeq   r0, 0x86dd, 161
+      a1     86dd      161: ldb   r0, [20]
+      a3       3a      163: jeq   r0, 0x3a, 176
+      b0       3a      176: ldb   r0, [54]
+      b2       86      178: jeq   r0, 0x85, DROP
+      b7       86      183: jne   r0, 0x88, 210
+      d2       86      210: ldm   r0, m[14]
+      d4       ee      212: jne   r0, 0x46, 297
+     129       ee      297: ldm   r0, m[14]
+     12b       ee      299: jne   r0, 0x66, 433
+     1b1       ee      433: ldm   r0, m[14]
+     1b3       ee      435: jne   r0, 0x6e, 571
+     23b       ee      571: ldm   r0, m[14]
+     23d       ee      573: jne   r0, 0x5e, 687
+     2af       ee      687: ldm   r0, m[14]
+     2b1       ee      689: jne   r0, 0x5e, 808
+     328       ee      808: ldm   r0, m[14]
+     32a       ee      810: jne   r0, 0x4e, PASS
+     38c       ee      908: PASS
+Packet passed
