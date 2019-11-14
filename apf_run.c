@@ -112,7 +112,7 @@ void apf_trace_hook(uint32_t pc, const uint32_t* regs, const uint8_t* program, u
                     const uint32_t* memory __unused, uint32_t memory_len __unused) {
     if (!tracing_enabled) return;
 
-    printf("%8" PRIx32 " %8" PRIx32 " ", pc, regs[0], regs[1]);
+    printf("%8" PRIx32 " %8" PRIx32 " ", regs[0], regs[1]);
     apf_disassemble(program, program_len, pc);
 }
 
