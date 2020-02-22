@@ -20,7 +20,7 @@ cc_library_static {
     name: "libapf",
     defaults: ["apf_defaults"],
     srcs: ["apf_interpreter.c"],
-
+    sdk_version: "24",
 }
 
 cc_binary_host {
