@@ -237,7 +237,7 @@ int main(int argc, char* argv[]) {
             case OPT_AGE:
                 errno = 0;
                 filter_age = strtoul(optarg, &endptr, 10);
-                if ((errno == ERANGE && filter_age == ULONG_MAX) ||
+                if ((errno == ERANGE && filter_age == UINT32_MAX) ||
                     (errno != 0 && filter_age == 0)) {
                     perror("Error on age option: strtoul");
                     exit(1);
