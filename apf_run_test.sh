@@ -8,7 +8,7 @@ testname=$(basename $(basename $0 .sh))
 retcode=0
 
 # Loop through testcases and run each one.
-# Each testcase is composed of a program, a packet, optionally the starting data, and the output.
+# Each testcase is composed of program, packet, output, and optionally, starting data and/or age.
 for prog in testdata/*.program; do
     testcase=$(basename $prog .program)
     prog=$(cat testdata/$testcase.program)
@@ -18,6 +18,9 @@ for prog in testdata/*.program; do
     args="--trace --program $prog --packet $pkt"
     if [[ -f testdata/$testcase.data ]]; then
         args="$args --data $(cat testdata/$testcase.data)"
+    fi
+    if [[ -f testdata/$testcase.age ]]; then
+        args="$args --age $(cat testdata/$testcase.age)"
     fi
 
     if diff --color -u <(apf_run $args) <(cat $outputpath); then
