@@ -23,7 +23,7 @@ for prog in testdata/*.program; do
         args="$args --age $(cat testdata/$testcase.age)"
     fi
 
-    if diff --color -u <(apf_run $args) <(cat $outputpath); then
+    if diff --color -u <(./apf_run $args) <(cat $outputpath); then
         echo $testname: $testcase: PASS
     else
         echo $testname: $testcase: FAIL
