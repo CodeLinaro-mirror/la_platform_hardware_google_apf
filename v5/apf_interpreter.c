@@ -17,7 +17,7 @@
 #include "apf_interpreter.h"
 
 // TODO: Remove the dependency of the standard library and make the interpreter self-contained.
-#include <string.h> // For memcmp
+#include <string.h>// For memcmp
 
 #include "apf.h"
 
@@ -43,11 +43,17 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
-                  const uint8_t* packet, uint32_t packet_len,
-                  uint32_t filter_age) {
+uint32_t apf_version() {
+    return 20231122;
+}
+
+int apf_run(uint8_t* const program, const uint32_t program_len,
+            const uint32_t ram_len, const uint8_t* const packet,
+            const uint32_t packet_len, const uint32_t filter_age_16384ths) {
 // Is offset within program bounds?
 #define IN_PROGRAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < program_len)
+// Is offset within ram bounds?
+#define IN_RAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < ram_len)
 // Is offset within packet bounds?
 #define IN_PACKET_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < packet_len)
 // Is access to offset |p| length |size| within data bounds?
@@ -58,6 +64,8 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                                  (p) + (size) >= (p))  // catch wraparounds
 // Accept packet if not within program bounds
 #define ASSERT_IN_PROGRAM_BOUNDS(p) ASSERT_RETURN(IN_PROGRAM_BOUNDS(p))
+// Accept packet if not within ram bounds
+#define ASSERT_IN_RAM_BOUNDS(p) ASSERT_RETURN(IN_RAM_BOUNDS(p))
 // Accept packet if not within packet bounds
 #define ASSERT_IN_PACKET_BOUNDS(p) ASSERT_RETURN(IN_PACKET_BOUNDS(p))
 // Accept packet if not within data bounds
@@ -74,7 +82,7 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
   memory[MEMORY_OFFSET_PROGRAM_SIZE] = program_len;
   memory[MEMORY_OFFSET_DATA_SIZE] = ram_len;
   memory[MEMORY_OFFSET_PACKET_SIZE] = packet_len;
-  memory[MEMORY_OFFSET_FILTER_AGE] = filter_age;
+  memory[MEMORY_OFFSET_FILTER_AGE] = filter_age_16384ths >> 14;
   ASSERT_IN_PACKET_BOUNDS(APF_FRAME_HEADER_SIZE);
   // Only populate if IP version is IPv4.
   if ((packet[APF_FRAME_HEADER_SIZE] & 0xf0) == 0x40) {
@@ -92,6 +100,19 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
   uint8_t* allocated_buffer = NULL;
   // The length of the output buffer
   uint32_t allocate_buffer_len = 0;
+// Is access to offset |p| length |size| within output buffer bounds?
+#define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
+                                 ENFORCE_UNSIGNED(size) && \
+                                 (p) + (size) <= allocate_buffer_len && \
+                                 (p) >= 0 && \
+                                 (p) + (size) >= (p))
+// Accept packet if not write within allocated output buffer
+#define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
+
+// Decode the imm length.
+#define DECODE_IMM(value, length)                                              \
+    for (uint32_t i = 0; i < (length) && pc < program_len; i++)                \
+        value = (value << 8) | program[pc++]
 
   do {
       APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, memory, ram_len);
@@ -113,9 +134,7 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
       if (len_field != 0) {
           const uint32_t imm_len = 1 << (len_field - 1);
           ASSERT_FORWARD_IN_PROGRAM(pc + imm_len - 1);
-          uint32_t i;
-          for (i = 0; i < imm_len; i++)
-              imm = (imm << 8) | program[pc++];
+          DECODE_IMM(imm, imm_len);
           // Sign extend imm into signed_imm.
           signed_imm = imm << ((4 - imm_len) * 8);
           signed_imm >>= (4 - imm_len) * 8;
@@ -178,9 +197,7 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
               } else if (len_field != 0) {
                   uint32_t cmp_imm_len = 1 << (len_field - 1);
                   ASSERT_FORWARD_IN_PROGRAM(pc + cmp_imm_len - 1);
-                  uint32_t i;
-                  for (i = 0; i < cmp_imm_len; i++)
-                      cmp_imm = (cmp_imm << 8) | program[pc++];
+                  DECODE_IMM(cmp_imm, cmp_imm_len);
               }
               switch (opcode) {
                   case JEQ_OPCODE:
@@ -307,6 +324,14 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                         0 /* dscp */);
                     allocated_buffer = NULL;
                     break;
+                  case DATA_EXT_OPCODE: {
+                    ASSERT_FORWARD_IN_PROGRAM(pc + 1);
+                    uint32_t skip_len = 0;
+                    DECODE_IMM(skip_len, 2);
+                    ASSERT_FORWARD_IN_PROGRAM(pc + skip_len - 1);
+                    pc += skip_len;
+                    break;
+                  }
                   // Unknown extended opcode
                   default:
                     // Bail out
@@ -344,6 +369,31 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                   program[offs++] = (val >> 24);
                   val <<= 8;
               }
+              break;
+          }
+          case MEMCOPY_OPCODE: {
+              ASSERT_RETURN(allocated_buffer != NULL);
+              ASSERT_RETURN(len_field > 0);
+              uint32_t src_offs = imm;
+              uint32_t copy_len = 0;
+              DECODE_IMM(copy_len, 1);
+              uint32_t dst_offs = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+              ASSERT_IN_OUTPUT_BOUNDS(dst_offs, copy_len);
+              // reg_num == 0 copy from packet, reg_num == 1 copy from data.
+              if (reg_num == 0) {
+                  ASSERT_IN_PACKET_BOUNDS(src_offs);
+                  const uint32_t last_packet_offs = src_offs + copy_len - 1;
+                  ASSERT_RETURN(last_packet_offs >= src_offs);
+                  ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+                  memmove(allocated_buffer + dst_offs, packet + src_offs,
+                          copy_len);
+              } else {
+                  ASSERT_IN_RAM_BOUNDS(src_offs + copy_len - 1);
+                  memmove(allocated_buffer + dst_offs, program + src_offs,
+                          copy_len);
+              }
+              dst_offs += copy_len;
+              memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = dst_offs;
               break;
           }
           // Unknown opcode
