@@ -85,6 +85,9 @@ sh_test_host {
             enabled: false,
         },
     },
+    data_libs: [
+        "libc++",
+    ],
     test_options: {
         unit_test: true,
     },
