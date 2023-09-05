@@ -141,7 +141,6 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
             }
             break;
         }
-        case ADD_OPCODE:
         case SH_OPCODE:
             PRINT_OPCODE();
             if (reg_num) {
@@ -150,6 +149,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
                 printf("r0, %d", signed_imm);
             }
             break;
+        case ADD_OPCODE:
         case MUL_OPCODE:
         case DIV_OPCODE:
         case AND_OPCODE:
