@@ -1,9 +1,9 @@
       R0       R1       PC  Instruction
 -------------------------------------------------
        0        0        0: li    r1, -4
-       0 fffffffc        2: lddw  r0, [r1+0]
+       0 fffffffc        2: lddw  r0, [r1]
       29 fffffffc        3: add   r0, 1
-      2a fffffffc        5: stdw  r0, [r1+0]
+      2a fffffffc        5: stdw  r0, [r1]
       2a fffffffc        6: ldh   r0, [12]
     86dd fffffffc        8: li    r1, -104
     86dd ffffff98       10: jlt   r0, 0x600, 503
@@ -27,9 +27,9 @@
       96 ffffffac      295: ldm   r0, m[15]
      259 ffffffac      297: jgt   r0, 0x258, 495
      259 ffffffac      495: li    r1, -28
-     259 ffffffe4      497: lddw  r0, [r1+0]
+     259 ffffffe4      497: lddw  r0, [r1]
        0 ffffffe4      498: add   r0, 1
-       1 ffffffe4      500: stdw  r0, [r1+0]
+       1 ffffffe4      500: stdw  r0, [r1]
        1 ffffffe4      501: jmp   PASS
        1 ffffffe4      509: PASS
 Packet passed
