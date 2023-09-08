@@ -161,6 +161,8 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
             PRINT_OPCODE();
             if (reg_num) {
                 printf("r0, r1");
+            } else if (!imm && opcode == DIV_OPCODE) {
+                printf("pass (div 0)");
             } else {
                 printf("r0, %u", imm);
             }
