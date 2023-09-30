@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef APF_INTERPRETER_H_
-#define APF_INTERPRETER_H_
+#ifndef APF_INTERPRETER_V5_H_
+#define APF_INTERPRETER_V5_H_
 
 #include <stdint.h>
 
@@ -24,13 +24,44 @@ extern "C" {
 #endif
 
 /**
- * Version of APF instruction set processed by accept_packet().
+ * Version of APF instruction set processed by apf_run().
  * Should be returned by wifi_get_packet_filter_info.
  */
-#define APF_VERSION 5
+uint32_t apf_version();
+
+/**
+ * Allocates buffer for APF program to write the transmit packet.
+ *
+ * The implementations must always support allocating at least one 1500 bytes
+ * buffer until it is effectively transmitted
+ *
+ * @param size the size of buffer to allocate, it should be the size of the
+ *             packet to be transmit.
+ * @return the pointer to the allocated region. The method can return null to
+ *         indicate the allocation failure due to not enough memory. This may
+ *         happened if there are too many buffers allocated that have not been
+ *         transmitted and deallocated yet.
+ */
+uint8_t* apf_allocate_buffer(uint32_t size);
+
+/**
+ * Transmit the allocated buffer and deallocate the memory region.
+ *
+ * @param ptr pointer to the transmit buffer
+ * @param len the length of buffer to be transmitted, 0 means don't transmit the
+ *            buffer but only deallocate it
+ * @param dscp the first 6 bits of the TOS field in the IPv4 header, the value
+ *             will be 0 if the transmitted packet is IPv6 packet.
+ */
+void apf_transmit_buffer(uint8_t *ptr, int len, int dscp);
 
 /**
  * Runs a packet filtering program over a packet.
+ *
+ * The return value of the apf_run indicates whether the packet should be
+ * passed to AP or not. As a part of apf_run execution, the packet filtering
+ * program can call apf_allocate_buffer()/apf_transmit_buffer() to construct
+ * an egress packet to transmit it.
  *
  * The text section containing the program instructions starts at address
  * program and stops at + program_len - 1, and the writable data section
@@ -53,9 +84,10 @@ extern "C" {
  * @param filter_age the number of seconds since the filter was programmed.
  *
  * @return non-zero if packet should be passed to AP, zero if
- *         packet should be dropped.
+ *         packet should be dropped. Return 1 indicating the packet is accepted
+ *         without error. Negative return value are reserved for error code.
  */
-int accept_packet(uint8_t* program, uint32_t program_len, uint32_t ram_len,
+int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                   const uint8_t* packet, uint32_t packet_len,
                   uint32_t filter_age);
 
@@ -63,4 +95,4 @@ int accept_packet(uint8_t* program, uint32_t program_len, uint32_t ram_len,
 }
 #endif
 
-#endif  // APF_INTERPRETER_H_
+#endif  // APF_INTERPRETER_V5_H_
