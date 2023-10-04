@@ -21,6 +21,9 @@ package {
 cc_library_static {
     name: "libapf_v5",
     defaults: ["apf_defaults"],
-    srcs: ["apf_interpreter.c"],
+    srcs: [
+        "apf_interpreter.c",
+        "test_buf_allocator.c"
+    ],
     sdk_version: "24",
 }
