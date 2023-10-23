@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef APF_INTERPRETER_H_
-#define APF_INTERPRETER_H_
+#ifndef APF_INTERPRETER_V5_H_
+#define APF_INTERPRETER_V5_H_
 
 #include <stdint.h>
 
@@ -24,13 +24,64 @@ extern "C" {
 #endif
 
 /**
- * Version of APF instruction set processed by accept_packet().
+ * Version of APF instruction set processed by apf_run().
  * Should be returned by wifi_get_packet_filter_info.
  */
-#define APF_VERSION 5
+uint32_t apf_version();
+
+/**
+ * Allocates a buffer for APF program to write the transmit packet.
+ *
+ * The implementations must always support allocating at least one 1500 bytes
+ * buffer until it is effectively transmitted.
+ *
+ * The firmware is responsible for freeing everything that was allocated by APF.
+ * It is OK if the firmware decides only to limit allocations to at most one
+ * response packet for every packet received by APF. In other words, while
+ * processing a single received packet, it is OK for apf_allocate_buffer() to
+ * succeed only once and return NULL after that.
+ *
+ * @param size the size of buffer to allocate, it should be the size of the
+ *             packet to be transmitted.
+ * @return the pointer to the allocated region. The function can return null to
+ *         indicate the allocation failure due to not enough memory. This may
+ *         happened if there are too many buffers allocated that have not been
+ *         transmitted and deallocated yet.
+ */
+uint8_t* apf_allocate_buffer(uint32_t size);
+
+/**
+ * Transmits the allocated buffer and deallocates the memory region.
+ *
+ * The function is responsible to verify if the range [ptr, ptr + len) is within
+ * the buffer it allocated for the program when apf_transmit_buffer() is called.
+ *
+ * The content of the buffer between [ptr, ptr + len) is the transmit packet
+ * bytes, starting from the 802.3 header and not including any CRC bytes at the
+ * end.
+ *
+ * The firmware must guarantee the transmit packet is not modified after the APF
+ * calls the apf_transmit_buffer().
+ *
+ * The firmware is expected to make its best effort to transmit. If it
+ * exhausts retries, or if there is no channel for too long and the transmit
+ * queue is full, then it is OK for the packet to be dropped.
+ *
+ * @param ptr pointer to the transmit buffer
+ * @param len the length of buffer to be transmitted, 0 means don't transmit the
+ *            buffer but only deallocate it
+ * @param dscp the first 6 bits of the TOS field in the IPv4 header or traffic
+ *             class field in the IPv6 header.
+ */
+void apf_transmit_buffer(uint8_t *ptr, uint32_t len, uint8_t dscp);
 
 /**
  * Runs a packet filtering program over a packet.
+ *
+ * The return value of the apf_run indicates whether the packet should be
+ * passed to AP or not. As a part of apf_run execution, the packet filtering
+ * program can call apf_allocate_buffer()/apf_transmit_buffer() to construct
+ * an egress packet to transmit it.
  *
  * The text section containing the program instructions starts at address
  * program and stops at + program_len - 1, and the writable data section
@@ -53,9 +104,10 @@ extern "C" {
  * @param filter_age the number of seconds since the filter was programmed.
  *
  * @return non-zero if packet should be passed to AP, zero if
- *         packet should be dropped.
+ *         packet should be dropped. Return 1 indicating the packet is accepted
+ *         without error. Negative return values are reserved for error code.
  */
-int accept_packet(uint8_t* program, uint32_t program_len, uint32_t ram_len,
+int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                   const uint8_t* packet, uint32_t packet_len,
                   uint32_t filter_age);
 
@@ -63,4 +115,4 @@ int accept_packet(uint8_t* program, uint32_t program_len, uint32_t ram_len,
 }
 #endif
 
-#endif  // APF_INTERPRETER_H_
+#endif  // APF_INTERPRETER_V5_H_

@@ -42,7 +42,7 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-int accept_packet(uint8_t* program, uint32_t program_len, uint32_t ram_len,
+int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
                   const uint8_t* packet, uint32_t packet_len,
                   uint32_t filter_age) {
 // Is offset within program bounds?
