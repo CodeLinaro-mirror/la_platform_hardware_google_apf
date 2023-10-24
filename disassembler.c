@@ -104,7 +104,11 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
         case LDHX_OPCODE:
         case LDWX_OPCODE:
             PRINT_OPCODE();
-            printf("r%d, [r1+%u]", reg_num, imm);
+            if (imm) {
+                printf("r%d, [r1+%u]", reg_num, imm);
+            } else {
+                printf("r%d, [r1]", reg_num);
+            }
             break;
         case JMP_OPCODE:
             PRINT_OPCODE();
@@ -141,7 +145,6 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
             }
             break;
         }
-        case ADD_OPCODE:
         case SH_OPCODE:
             PRINT_OPCODE();
             if (reg_num) {
@@ -150,6 +153,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
                 printf("r0, %d", signed_imm);
             }
             break;
+        case ADD_OPCODE:
         case MUL_OPCODE:
         case DIV_OPCODE:
         case AND_OPCODE:
@@ -157,6 +161,8 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
             PRINT_OPCODE();
             if (reg_num) {
                 printf("r0, r1");
+            } else if (!imm && opcode == DIV_OPCODE) {
+                printf("pass (div 0)");
             } else {
                 printf("r0, %u", imm);
             }
@@ -204,7 +210,13 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t 
         case LDDW_OPCODE:
         case STDW_OPCODE:
             PRINT_OPCODE();
-            printf("r%u, [r%u+%d]", reg_num, reg_num ^ 1, signed_imm);
+            if (signed_imm > 0) {
+                printf("r%u, [r%u+%d]", reg_num, reg_num ^ 1, signed_imm);
+            } else if (signed_imm < 0) {
+                printf("r%u, [r%u-%d]", reg_num, reg_num ^ 1, -signed_imm);
+            } else {
+                printf("r%u, [r%u]", reg_num, reg_num ^ 1);
+            }
             break;
 
         // Unknown opcode
