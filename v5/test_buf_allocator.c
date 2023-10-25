@@ -17,11 +17,11 @@
 #include <string.h>
 
 #include "apf_interpreter.h"
+#include "test_buf_allocator.h"
 
-#define BUFFER_SIZE 1500
-
-uint8_t apf_test_buffer[BUFFER_SIZE];
-uint8_t apf_test_tx_packet[BUFFER_SIZE];
+uint8_t apf_test_buffer[APF_TX_BUFFER_SIZE];
+uint8_t apf_test_tx_packet[APF_TX_BUFFER_SIZE];
+uint32_t apf_test_tx_packet_len;
 uint8_t apf_test_tx_dscp;
 
 /**
@@ -37,10 +37,10 @@ uint32_t apf_version() {
  * Clean up the apf_test_buffer and return the pointer to beginning of the buffer region.
  */
 uint8_t* apf_allocate_buffer(uint32_t size) {
-  if (size > BUFFER_SIZE) {
+  if (size > APF_TX_BUFFER_SIZE) {
     return NULL;
   }
-  memset(apf_test_buffer, 0, BUFFER_SIZE * sizeof(apf_test_buffer[0]));
+  memset(apf_test_buffer, 0, APF_TX_BUFFER_SIZE * sizeof(apf_test_buffer[0]));
   return apf_test_buffer;
 }
 
@@ -50,6 +50,7 @@ uint8_t* apf_allocate_buffer(uint32_t size) {
  * Copy the content of allocated buffer to the apf_test_tx_packet region.
  */
 void apf_transmit_buffer(uint8_t* ptr, uint32_t len, uint8_t dscp) {
+  apf_test_tx_packet_len = len;
   apf_test_tx_dscp = dscp;
   memcpy(apf_test_tx_packet, ptr, len);
 }
