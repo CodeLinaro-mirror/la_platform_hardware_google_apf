@@ -55,6 +55,7 @@ static const char* opcode_names [] = {
     [JNEBS_OPCODE] = "jnebs",
     [LDDW_OPCODE] = "lddw",
     [STDW_OPCODE] = "stdw",
+    [WRITE_OPCODE] = "write",
 };
 
 static int print_jump_target(uint32_t target, uint32_t program_len,
@@ -366,6 +367,20 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                     ASSERT_RET_INBOUND(ret);
                     offset += ret;
                     break;
+                case EWRITE1_EXT_OPCODE:
+                case EWRITE2_EXT_OPCODE:
+                case EWRITE4_EXT_OPCODE: {
+                    ret = print_opcode("write", output_buffer,
+                                       output_buffer_len, offset);
+                    ASSERT_RET_INBOUND(ret);
+                    offset += ret;
+                    ret = snprintf(output_buffer + offset,
+                                   output_buffer_len - offset, "r%d, %d",
+                                   reg_num, 1 << (imm - EWRITE1_EXT_OPCODE));
+                    ASSERT_RET_INBOUND(ret);
+                    offset += ret;
+                    break;
+                }
                 default:
                     ret = snprintf(output_buffer + offset,
                                    output_buffer_len - offset, "unknown_ext %u",
@@ -400,7 +415,28 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                 offset += ret;
             }
             break;
+        case WRITE_OPCODE: {
+            ret = PRINT_OPCODE();
+            ASSERT_RET_INBOUND(ret);
+            offset += ret;
+            uint32_t write_len = 1 << (len_field - 1);
+            if (write_len > 0) {
+                ret = snprintf(output_buffer + offset,
+                               output_buffer_len - offset, "0x");
+                ASSERT_RET_INBOUND(ret);
+                offset += ret;
+            }
+            for (uint32_t i = 0; i < write_len; ++i) {
+                uint8_t byte =
+                    (uint8_t) ((imm >> (write_len - 1 - i) * 8) & 0xff);
+                ret = snprintf(output_buffer + offset,
+                               output_buffer_len - offset, "%02x", byte);
+                ASSERT_RET_INBOUND(ret);
+                offset += ret;
 
+            }
+            break;
+        }
         // Unknown opcode
         default:
             ret = snprintf(output_buffer + offset, output_buffer_len - offset,
