@@ -33,7 +33,8 @@ uint32_t apf_version();
  * Allocates a buffer for APF program to write the transmit packet.
  *
  * The implementations must always support allocating at least one 1500 bytes
- * buffer until it is effectively transmitted.
+ * buffer until it is effectively transmitted. Before passing a memory region
+ * back to the caller, the implementations must zero it out.
  *
  * The firmware is responsible for freeing everything that was allocated by APF.
  * It is OK if the firmware decides only to limit allocations to at most one
