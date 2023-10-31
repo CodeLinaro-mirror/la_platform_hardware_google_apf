@@ -32,6 +32,45 @@
 
 #define __unused __attribute__((unused))
 
+// The following list must be in sync with
+// https://cs.android.com/android/platform/superproject/main/+/main:packages/modules/NetworkStack/src/android/net/apf/ApfFilter.java;l=125
+static const char* counter_name [] = {
+    "RESERVED_OOB",
+    "TOTAL_PACKETS",
+    "PASSED_ARP",
+    "PASSED_DHCP",
+    "PASSED_IPV4",
+    "PASSED_IPV6_NON_ICMP",
+    "PASSED_IPV4_UNICAST",
+    "PASSED_IPV6_ICMP",
+    "PASSED_IPV6_UNICAST_NON_ICMP",
+    "PASSED_ARP_NON_IPV4",
+    "PASSED_ARP_UNKNOWN",
+    "PASSED_ARP_UNICAST_REPLY",
+    "PASSED_NON_IP_UNICAST",
+    "PASSED_MDNS",
+    "DROPPED_ETH_BROADCAST",
+    "DROPPED_RA",
+    "DROPPED_GARP_REPLY",
+    "DROPPED_ARP_OTHER_HOST",
+    "DROPPED_IPV4_L2_BROADCAST",
+    "DROPPED_IPV4_BROADCAST_ADDR",
+    "DROPPED_IPV4_BROADCAST_NET",
+    "DROPPED_IPV4_MULTICAST",
+    "DROPPED_IPV6_ROUTER_SOLICITATION",
+    "DROPPED_IPV6_MULTICAST_NA",
+    "DROPPED_IPV6_MULTICAST",
+    "DROPPED_IPV6_MULTICAST_PING",
+    "DROPPED_IPV6_NON_ICMP_MULTICAST",
+    "DROPPED_802_3_FRAME",
+    "DROPPED_ETHERTYPE_BLACKLISTED",
+    "DROPPED_ARP_REPLY_SPA_NO_HOST",
+    "DROPPED_IPV4_KEEPALIVE_ACK",
+    "DROPPED_IPV6_KEEPALIVE_ACK",
+    "DROPPED_IPV4_NATT_KEEPALIVE",
+    "DROPPED_MDNS"
+};
+
 enum {
     OPT_PROGRAM,
     OPT_PACKET,
@@ -48,7 +87,10 @@ const struct option long_options[] = {{"program", 1, NULL, OPT_PROGRAM},
                                       {"age", 1, NULL, OPT_AGE},
                                       {"trace", 0, NULL, OPT_TRACE},
                                       {"help", 0, NULL, 'h'},
+                                      {"cnt", 0, NULL, 'c'},
                                       {NULL, 0, NULL, 0}};
+
+const int COUNTER_SIZE = 4;
 
 // Parses hex in "input". Allocates and fills "*output" with parsed bytes.
 // Returns length in bytes of "*output".
@@ -79,6 +121,28 @@ size_t parse_hex(const char* input, uint8_t** output) {
 void print_hex(const uint8_t* input, int len) {
     for (int i = 0; i < len; ++i) {
         printf("%02x", input[i]);
+    }
+}
+
+uint32_t get_counter_value(const uint8_t* data, int data_len, int neg_offset) {
+    if (neg_offset > -COUNTER_SIZE || neg_offset + data_len < 0) {
+        return 0;
+    }
+    uint32_t value = 0;
+    for (int i = 0; i < 4; ++i) {
+        value = value << 8 | data[data_len + neg_offset];
+        neg_offset++;
+    }
+    return value;
+}
+
+void print_counter(const uint8_t* data, int data_len) {
+    int counter_len = sizeof(counter_name) / sizeof(counter_name[0]);
+    for (int i = 0; i < counter_len; ++i) {
+        uint32_t value = get_counter_value(data, data_len, -COUNTER_SIZE * i);
+        if (value != 0) {
+            printf("%s : %d \n", counter_name[i], value);
+        }
     }
 }
 
@@ -176,6 +240,7 @@ void print_usage(char* cmd) {
             "  --data       Data memory contents, in hex.\n"
             "  --age        Age of program in seconds (default: 0).\n"
             "  --trace      Enable APF interpreter debug tracing\n"
+            "  -c, --cnt    Print the APF counters\n"
             "  -h, --help   Show this message.\n",
             basename(cmd));
 }
@@ -188,11 +253,12 @@ int main(int argc, char* argv[]) {
     uint8_t* data = NULL;
     uint32_t data_len = 0;
     uint32_t filter_age = 0;
+    int print_counter_enabled = 0;
 
     int opt;
     char *endptr;
 
-    while ((opt = getopt_long_only(argc, argv, "h", long_options, NULL)) != -1) {
+    while ((opt = getopt_long_only(argc, argv, "ch", long_options, NULL)) != -1) {
         switch (opt) {
             case OPT_PROGRAM:
                 program_len = parse_hex(optarg, &program);
@@ -249,6 +315,9 @@ int main(int argc, char* argv[]) {
                 print_usage(argv[0]);
                 exit(0);
                 break;
+            case 'c':
+                print_counter_enabled = 1;
+                break;
             default:
                 print_usage(argv[0]);
                 exit(1);
@@ -284,6 +353,10 @@ int main(int argc, char* argv[]) {
         printf("Data: ");
         print_hex(program + program_len, data_len);
         printf("\n");
+        if (print_counter_enabled) {
+          printf("APF packet counters: \n");
+          print_counter(program + program_len, data_len);
+        }
     }
 
     free(program);

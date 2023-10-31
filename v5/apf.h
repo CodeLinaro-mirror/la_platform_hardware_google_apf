@@ -124,6 +124,10 @@
 // Number of temporary memory slots, see ldm/stm instructions.
 #define MEMORY_ITEMS 16
 // Upon program execution, some temporary memory slots are prefilled:
+
+// Offset inside the output buffer where the next byte of output packet should
+// be written to.
+#define MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET 10
 #define MEMORY_OFFSET_PROGRAM_SIZE 11     // Size of program (in bytes)
 #define MEMORY_OFFSET_DATA_SIZE 12        // Total size of program + data
 #define MEMORY_OFFSET_IPV4_HEADER_SIZE 13 // 4*([APF_FRAME_HEADER_SIZE]&15)
@@ -165,6 +169,8 @@
 #define NEG_EXT_OPCODE 33  // Negate, e.g. "neg R0"
 #define SWAP_EXT_OPCODE 34 // Swap, e.g. "swap R0,R1"
 #define MOV_EXT_OPCODE 35  // Move, e.g. "move R0,R1"
+#define ALLOC_EXT_OPCODE 36 // Allocate buffer, "e.g. ALLOC R0"
+#define TRANS_EXT_OPCODE 37 // Transmit buffer, "e.g. TRANS R0"
 
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
