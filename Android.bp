@@ -40,6 +40,15 @@ cc_library_static {
     sdk_version: "24",
 }
 
+cc_library_static {
+    name: "libapfdisassembler",
+    defaults: ["apf_defaults"],
+    srcs: [
+        "disassembler.c",
+    ],
+    sdk_version: "24",
+}
+
 cc_binary_host {
     name: "apf_disassembler",
     defaults: ["apf_defaults"],
