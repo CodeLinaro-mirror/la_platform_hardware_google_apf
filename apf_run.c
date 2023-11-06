@@ -171,13 +171,17 @@ void packet_handler(uint8_t* program, uint32_t program_len, uint32_t ram_len,
     free(packet);
 }
 
+static char output_buffer[512];
+
 void apf_trace_hook(uint32_t pc, const uint32_t* regs, const uint8_t* program, uint32_t program_len,
                     const uint8_t* packet __unused, uint32_t packet_len __unused,
                     const uint32_t* memory __unused, uint32_t memory_len __unused) {
     if (!tracing_enabled) return;
 
     printf("%8" PRIx32 " %8" PRIx32 " ", regs[0], regs[1]);
-    apf_disassemble(program, program_len, pc);
+    apf_disassemble(program, program_len, pc, output_buffer,
+                    sizeof(output_buffer) / sizeof(output_buffer[0]));
+    printf("%s\n", output_buffer);
 }
 
 // Process pcap file through APF filter and generate output files

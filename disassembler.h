@@ -18,4 +18,26 @@
 
 #include <stdint.h>
 
-uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t pc);
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * Disassembles a APF program into a human-readable format.
+ *
+ * @param program the program bytecode.
+ * @param program_len the length of the program bytecode.
+ * @param pc The program counter which point to the current instruction.
+ * @param output_buffer A pointer to a buffer where the disassembled
+ *                      instruction will be stored.
+ * @param output_buffer_len the length of the output buffer.
+ *
+ * @return the program counter which point to the next instruction.
+ */
+uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
+                         uint32_t pc, char* output_buffer,
+                         int output_buffer_len);
+
+#ifdef __cplusplus
+}
+#endif
