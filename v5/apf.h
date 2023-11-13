@@ -158,6 +158,7 @@
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
 #define LDDW_OPCODE 22  // Load 4 bytes from data address (register + simm): "lddw R0, [5+R1]"
 #define STDW_OPCODE 23  // Store 4 bytes to data address (register + simm): "stdw R0, [5+R1]"
+#define WRITE_OPCODE 24 // Write 1, 2 or 4 bytes imm to the output buffer, e.g. "WRITE 5"
 
 // Extended opcodes. These all have an opcode of EXT_OPCODE
 // and specify the actual opcode in the immediate field.
@@ -171,6 +172,9 @@
 #define MOV_EXT_OPCODE 35  // Move, e.g. "move R0,R1"
 #define ALLOC_EXT_OPCODE 36 // Allocate buffer, "e.g. ALLOC R0"
 #define TRANS_EXT_OPCODE 37 // Transmit buffer, "e.g. TRANS R0"
+#define EWRITE1_EXT_OPCODE 38 // Write 1 byte from register to the output buffer, e.g. "EWRITE1 R0"
+#define EWRITE2_EXT_OPCODE 39 // Write 2 bytes from register to the output buffer, e.g. "EWRITE2 R0"
+#define EWRITE4_EXT_OPCODE 40 // Write 4 bytes from register to the output buffer, e.g. "EWRITE4 R0"
 
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
