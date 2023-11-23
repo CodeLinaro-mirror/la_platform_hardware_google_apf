@@ -43,9 +43,13 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
-                  const uint8_t* packet, uint32_t packet_len,
-                  uint32_t filter_age) {
+uint32_t apf_version() {
+    return 20231122;
+}
+
+int apf_run(uint8_t* const program, const uint32_t program_len,
+            const uint32_t ram_len, const uint8_t* const packet,
+            const uint32_t packet_len, const uint32_t filter_age_16384ths) {
 // Is offset within program bounds?
 #define IN_PROGRAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < program_len)
 // Is offset within packet bounds?
@@ -74,7 +78,7 @@ int apf_run(uint8_t* program, uint32_t program_len, uint32_t ram_len,
   memory[MEMORY_OFFSET_PROGRAM_SIZE] = program_len;
   memory[MEMORY_OFFSET_DATA_SIZE] = ram_len;
   memory[MEMORY_OFFSET_PACKET_SIZE] = packet_len;
-  memory[MEMORY_OFFSET_FILTER_AGE] = filter_age;
+  memory[MEMORY_OFFSET_FILTER_AGE] = filter_age_16384ths >> 14;
   ASSERT_IN_PACKET_BOUNDS(APF_FRAME_HEADER_SIZE);
   // Only populate if IP version is IPv4.
   if ((packet[APF_FRAME_HEADER_SIZE] & 0xf0) == 0x40) {
