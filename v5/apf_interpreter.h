@@ -45,13 +45,14 @@ uint32_t apf_version();
  * allow firmware to later (during or after apf_transmit_buffer call) populate
  * any required headers, trailers, etc.
  *
+ * @param ctx - unmodified ctx pointer passed into apf_run().
  * @param size - the minimum size of buffer to allocate
  * @return the pointer to the allocated region. The function can return NULL to
  *         indicate allocation failure, for example if too many buffers are
  *         pending transmit. Returning NULL will most likely result in the
  *         apf_run() returning PASS.
  */
-uint8_t* apf_allocate_buffer(int size);
+uint8_t* apf_allocate_buffer(void* ctx, int size);
 
 /**
  * Transmits the allocated buffer and deallocates it.
@@ -71,6 +72,7 @@ uint8_t* apf_allocate_buffer(int size);
  * apf_transmit_buffer() should be asynchronous, which means the actual packet
  * transmission can happen sometime after the function returns.
  *
+ * @param ctx - unmodified ctx pointer passed into apf_run().
  * @param ptr - pointer to the transmit buffer, must have been previously
  *             returned by apf_allocate_buffer and not deallocated.
  * @param len - the number of bytes to be transmitted (possibly less than
@@ -82,7 +84,7 @@ uint8_t* apf_allocate_buffer(int size);
  *         the firmware thinks the transmit will succeed. Returning an error
  *         will likely result in apf_run() returning PASS.
  */
-int apf_transmit_buffer(uint8_t* ptr, int len, uint8_t dscp);
+int apf_transmit_buffer(void* ctx, uint8_t* ptr, int len, uint8_t dscp);
 
 /**
  * Runs an APF program over a packet.
@@ -101,6 +103,10 @@ int apf_transmit_buffer(uint8_t* ptr, int len, uint8_t dscp);
  *        |    text section    |      data section      |
  *        +--------------------+------------------------+
  *
+ * @param ctx - pointer to any additional context required for allocation and transmit.
+                may be null if no such context is required. this is opaque to
+                the interpreter and will be passed through unmodified
+                to apf_allocate_buffer() and apf_transmit_buffer() calls.
  * @param program - the program bytecode, followed by the writable data region.
  * @param program_len - the length in bytes of the read-only portion of the APF
  *                    buffer pointed to by {@code program}.
@@ -116,7 +122,7 @@ int apf_transmit_buffer(uint8_t* ptr, int len, uint8_t dscp);
  * @return non-zero if packet should be passed, zero if packet should
  *                  be dropped.
  */
-int apf_run(uint8_t* const program, const uint32_t program_len,
+int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
             const uint32_t ram_len, const uint8_t* const packet,
             const uint32_t packet_len, const uint32_t filter_age_16384ths);
 

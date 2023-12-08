@@ -44,10 +44,10 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
 uint32_t apf_version() {
-    return 20231122;
+    return 20231207;
 }
 
-int apf_run(uint8_t* const program, const uint32_t program_len,
+int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
             const uint32_t ram_len, const uint8_t* const packet,
             const uint32_t packet_len, const uint32_t filter_age_16384ths) {
 // Is offset within program bounds?
@@ -299,7 +299,8 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
                   case ALLOC_EXT_OPCODE:
                     ASSERT_RETURN(allocated_buffer == NULL);
                     allocate_buffer_len = REG;
-                    allocated_buffer = apf_allocate_buffer(allocate_buffer_len);
+                    allocated_buffer =
+                        apf_allocate_buffer(ctx, allocate_buffer_len);
                     ASSERT_RETURN(allocated_buffer != NULL);
                     memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = 0;
                     break;
@@ -311,6 +312,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
                     // happened and the allocated_buffer should be deallocated.
                     if (pkt_len > allocate_buffer_len) {
                         apf_transmit_buffer(
+                            ctx,
                             allocated_buffer,
                             0 /* len */,
                             0 /* dscp */);
@@ -318,6 +320,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
                     }
                     // TODO: calculate packet checksum and get dscp
                     apf_transmit_buffer(
+                        ctx,
                         allocated_buffer,
                         pkt_len,
                         0 /* dscp */);
