@@ -18,9 +18,25 @@ package {
     default_applicable_licenses: ["hardware_google_apf_license"],
 }
 
+cc_defaults {
+    name: "apfv5_defaults",
+
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Werror=implicit-fallthrough",
+        "-Wnullable-to-nonnull-conversion",
+        "-Wsign-compare",
+        "-Wsign-conversion",
+        "-Wthread-safety",
+        "-Wunused-parameter",
+        "-Wuninitialized",
+    ],
+}
+
 cc_library_static {
     name: "libapf_v5",
-    defaults: ["apf_defaults"],
+    defaults: ["apfv5_defaults"],
     srcs: [
         "apf_interpreter.c",
         "test_buf_allocator.c"
