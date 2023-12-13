@@ -46,7 +46,7 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
 uint32_t apf_version() {
-    return 20231207;
+    return 20231211;
 }
 
 int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
@@ -101,11 +101,11 @@ int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
   // The output buffer pointer
   uint8_t* allocated_buffer = NULL;
   // The length of the output buffer
-  int allocate_buffer_len = 0;
+  uint32_t allocated_buffer_len = 0;
 // Is access to offset |p| length |size| within output buffer bounds?
 #define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
-                                 (p) + (size) <= (uint32_t) allocate_buffer_len && \
+                                 (p) + (size) <= allocated_buffer_len && \
                                  (p) + (size) >= (p))
 // Accept packet if not write within allocated output buffer
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
@@ -300,19 +300,18 @@ int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
                     break;
                   case ALLOC_EXT_OPCODE:
                     ASSERT_RETURN(allocated_buffer == NULL);
-                    allocate_buffer_len = (int) REG;
+                    allocated_buffer_len = REG;
                     allocated_buffer =
-                        apf_allocate_buffer(ctx, allocate_buffer_len);
+                        apf_allocate_buffer(ctx, allocated_buffer_len);
                     ASSERT_RETURN(allocated_buffer != NULL);
                     memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = 0;
                     break;
                   case TRANS_EXT_OPCODE:
                     ASSERT_RETURN(allocated_buffer != NULL);
-                    int pkt_len =
-                        (int) memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+                    uint32_t pkt_len = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
                     // If pkt_len > allocate_buffer_len, it means sth. wrong
                     // happened and the allocated_buffer should be deallocated.
-                    if (pkt_len > allocate_buffer_len) {
+                    if (pkt_len > allocated_buffer_len) {
                         apf_transmit_buffer(
                             ctx,
                             allocated_buffer,
