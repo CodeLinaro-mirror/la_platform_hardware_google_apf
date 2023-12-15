@@ -45,8 +45,8 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-uint32_t apf_version() {
-    return 20231211;
+uint32_t apf_version(void) {
+    return 20231214;
 }
 
 int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
