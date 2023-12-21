@@ -104,7 +104,6 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
 #define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
                                  (p) + (size) <= allocate_buffer_len && \
-                                 (p) >= 0 && \
                                  (p) + (size) >= (p))
 // Accept packet if not write within allocated output buffer
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
