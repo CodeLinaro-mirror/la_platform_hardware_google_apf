@@ -37,9 +37,9 @@ extern "C" {
  * begins at program + program_len and ends at program + ram_len - 1,
  * as described in the following diagram:
  *
- *     program         program + program_len    program + ram_len
- *        |    text section    |      data section      |
- *        +--------------------+------------------------+
+ *     program         program + program_len    program + ram_len
+ *        |    text section    |      data section      |
+ *        +--------------------+------------------------+
  *
  * @param program the program bytecode, followed by the writable data region.
  * @param program_len the length in bytes of the read-only portion of the APF
