@@ -29,7 +29,7 @@ uint8_t apf_test_tx_dscp;
  *
  * Clean up the apf_test_buffer and return the pointer to beginning of the buffer region.
  */
-uint8_t* apf_allocate_buffer(int size) {
+uint8_t* apf_allocate_buffer(__attribute__ ((unused)) void* ctx, uint32_t size) {
   if (size > APF_TX_BUFFER_SIZE) {
     return NULL;
   }
@@ -42,9 +42,10 @@ uint8_t* apf_allocate_buffer(int size) {
  *
  * Copy the content of allocated buffer to the apf_test_tx_packet region.
  */
-int apf_transmit_buffer(uint8_t* ptr, int len, uint8_t dscp) {
+int apf_transmit_buffer(__attribute__((unused)) void* ctx, uint8_t* ptr,
+                        uint32_t len, uint8_t dscp) {
   apf_test_tx_packet_len = len;
   apf_test_tx_dscp = dscp;
-  memcpy(apf_test_tx_packet, ptr, len);
+  memcpy(apf_test_tx_packet, ptr, (size_t) len);
   return 0;
 }

@@ -32,6 +32,8 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
     } while (0)
 #endif
 
+// Frame header size should be 14
+#define APF_FRAME_HEADER_SIZE 14
 // Return code indicating "packet" should accepted.
 #define PASS_PACKET 1
 // Return code indicating "packet" should be dropped.
@@ -43,11 +45,11 @@ extern void APF_TRACE_HOOK(uint32_t pc, const uint32_t* regs, const uint8_t* pro
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-uint32_t apf_version() {
-    return 20231122;
+uint32_t apf_version(void) {
+    return 20231214;
 }
 
-int apf_run(uint8_t* const program, const uint32_t program_len,
+int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
             const uint32_t ram_len, const uint8_t* const packet,
             const uint32_t packet_len, const uint32_t filter_age_16384ths) {
 // Is offset within program bounds?
@@ -99,11 +101,11 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
   // The output buffer pointer
   uint8_t* allocated_buffer = NULL;
   // The length of the output buffer
-  uint32_t allocate_buffer_len = 0;
+  uint32_t allocated_buffer_len = 0;
 // Is access to offset |p| length |size| within output buffer bounds?
 #define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
-                                 (p) + (size) <= allocate_buffer_len && \
+                                 (p) + (size) <= allocated_buffer_len && \
                                  (p) + (size) >= (p))
 // Accept packet if not write within allocated output buffer
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
@@ -135,7 +137,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
           ASSERT_FORWARD_IN_PROGRAM(pc + imm_len - 1);
           DECODE_IMM(imm, imm_len);
           // Sign extend imm into signed_imm.
-          signed_imm = imm << ((4 - imm_len) * 8);
+          signed_imm = (int32_t) (imm << ((4 - imm_len) * 8));
           signed_imm >>= (4 - imm_len) * 8;
       }
 
@@ -265,7 +267,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
               break;
           }
           case LI_OPCODE:
-              REG = signed_imm;
+              REG = (uint32_t) signed_imm;
               break;
           case EXT_OPCODE:
               if (
@@ -298,19 +300,20 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
                     break;
                   case ALLOC_EXT_OPCODE:
                     ASSERT_RETURN(allocated_buffer == NULL);
-                    allocate_buffer_len = REG;
-                    allocated_buffer = apf_allocate_buffer(allocate_buffer_len);
+                    allocated_buffer_len = REG;
+                    allocated_buffer =
+                        apf_allocate_buffer(ctx, allocated_buffer_len);
                     ASSERT_RETURN(allocated_buffer != NULL);
                     memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = 0;
                     break;
                   case TRANS_EXT_OPCODE:
                     ASSERT_RETURN(allocated_buffer != NULL);
-                    uint32_t pkt_len =
-                        memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+                    uint32_t pkt_len = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
                     // If pkt_len > allocate_buffer_len, it means sth. wrong
                     // happened and the allocated_buffer should be deallocated.
-                    if (pkt_len > allocate_buffer_len) {
+                    if (pkt_len > allocated_buffer_len) {
                         apf_transmit_buffer(
+                            ctx,
                             allocated_buffer,
                             0 /* len */,
                             0 /* dscp */);
@@ -318,6 +321,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
                     }
                     // TODO: calculate packet checksum and get dscp
                     apf_transmit_buffer(
+                        ctx,
                         allocated_buffer,
                         pkt_len,
                         0 /* dscp */);
@@ -338,7 +342,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
               }
               break;
           case LDDW_OPCODE: {
-              uint32_t offs = OTHER_REG + signed_imm;
+              uint32_t offs = OTHER_REG + (uint32_t) signed_imm;
               uint32_t size = 4;
               uint32_t val = 0;
               // Negative offsets wrap around the end of the address space.
@@ -354,7 +358,7 @@ int apf_run(uint8_t* const program, const uint32_t program_len,
               break;
           }
           case STDW_OPCODE: {
-              uint32_t offs = OTHER_REG + signed_imm;
+              uint32_t offs = OTHER_REG + (uint32_t) signed_imm;
               uint32_t size = 4;
               uint32_t val = REG;
               // Negative offsets wrap around the end of the address space.
