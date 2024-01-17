@@ -113,6 +113,10 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
     const uint32_t opcode = EXTRACT_OPCODE(bytecode);
 #define PRINT_OPCODE()                                                         \
     print_opcode(opcode_names[opcode], output_buffer, output_buffer_len, offset)
+#define DECODE_IMM(value, length)                                              \
+    for (uint32_t i = 0; i < (length) && pc < program_len; i++)                \
+        value = (value << 8) | program[pc++]
+
     const uint32_t reg_num = EXTRACT_REGISTER(bytecode);
     // All instructions have immediate fields, so load them now.
     const uint32_t len_field = EXTRACT_IMM_LENGTH(bytecode);
@@ -120,8 +124,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
     int32_t signed_imm = 0;
     if (len_field != 0) {
         const uint32_t imm_len = 1 << (len_field - 1);
-        for (uint32_t i = 0; i < imm_len && pc < program_len; i++)
-            imm = (imm << 8) | program[pc++];
+        DECODE_IMM(imm, imm_len);
         // Sign extend imm into signed_imm.
         signed_imm = imm << ((4 - imm_len) * 8);
         signed_imm >>= (4 - imm_len) * 8;
@@ -193,10 +196,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                 ASSERT_RET_INBOUND(ret);
                 offset += ret;
             } else {
-                uint32_t cmp_imm_len = 1 << (len_field - 1);
-                uint32_t i;
-                for (i = 0; i < cmp_imm_len && pc < program_len; i++)
-                    cmp_imm = (cmp_imm << 8) | program[pc++];
+                DECODE_IMM(cmp_imm, 1 << (len_field - 1));
                 ret = snprintf(output_buffer + offset,
                               output_buffer_len - offset, "0x%x, ", cmp_imm);
                 ASSERT_RET_INBOUND(ret);
@@ -381,6 +381,32 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                     offset += ret;
                     break;
                 }
+                case EDATACOPY:
+                case EPKTCOPY: {
+                    if (imm == EPKTCOPY) {
+                        ret = print_opcode("pcopy", output_buffer,
+                                           output_buffer_len, offset);
+                    } else {
+                        ret = print_opcode("dcopy", output_buffer,
+                                           output_buffer_len, offset);
+                    }
+                    ASSERT_RET_INBOUND(ret);
+                    offset += ret;
+                    if (len_field > 0) {
+                        const uint32_t imm_len = 1 << (len_field - 1);
+                        uint32_t relative_offs = 0;
+                        DECODE_IMM(relative_offs, imm_len);
+                        uint32_t copy_len = 0;
+                        DECODE_IMM(copy_len, 1);
+
+                        ret = snprintf(
+                            output_buffer + offset, output_buffer_len - offset,
+                            "[r%u+%d], %d", reg_num, relative_offs, copy_len);
+                        ASSERT_RET_INBOUND(ret);
+                        offset += ret;
+                    }
+                    break;
+                }
                 default:
                     ret = snprintf(output_buffer + offset,
                                    output_buffer_len - offset, "unknown_ext %u",
@@ -434,6 +460,28 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                 ASSERT_RET_INBOUND(ret);
                 offset += ret;
 
+            }
+            break;
+        }
+        case MEMCOPY_OPCODE: {
+            if (reg_num == 0) {
+                ret = print_opcode("pcopy", output_buffer, output_buffer_len,
+                                   offset);
+            } else {
+                ret = print_opcode("dcopy", output_buffer, output_buffer_len,
+                                   offset);
+            }
+            ASSERT_RET_INBOUND(ret);
+            offset += ret;
+            if (len_field > 0) {
+                uint32_t src_offs = imm;
+                uint32_t copy_len = 0;
+                DECODE_IMM(copy_len, 1);
+                ret =
+                    snprintf(output_buffer + offset, output_buffer_len - offset,
+                             "%d, %d", src_offs, copy_len);
+                ASSERT_RET_INBOUND(ret);
+                offset += ret;
             }
             break;
         }
