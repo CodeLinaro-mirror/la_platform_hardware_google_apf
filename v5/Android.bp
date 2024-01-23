@@ -40,7 +40,29 @@ cc_library_static {
     defaults: ["apfv5_defaults"],
     srcs: [
         "apf_interpreter.c",
-        "test_buf_allocator.c"
+        "test_buf_allocator.c",
     ],
     sdk_version: "24",
+}
+
+cc_test_host {
+    name: "apfv5_test",
+    srcs: [
+        "apf_interpreter.c",
+        "test_buf_allocator.c",
+        "apf_interpreter_test.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Werror",
+        "-Werror=implicit-fallthrough",
+        "-Werror=strict-prototypes",
+        "-Wnullable-to-nonnull-conversion",
+        "-Wsign-compare",
+        "-Wsign-conversion",
+        "-Wthread-safety",
+        "-Wunused-parameter",
+        "-Wuninitialized",
+    ],
+    stl: "c++_static",
 }

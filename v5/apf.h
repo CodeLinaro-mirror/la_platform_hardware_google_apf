@@ -186,10 +186,15 @@
 // Copy the data from APF data region to output buffer. The source offset is encoded as [Rx + second imm].
 // The copy length is encoded in the third imm. "e.g. EDATACOPY [R0 + 5], 5"
 #define EDATACOPY 42
-//  It is executed as a jump, it tells how many bytes of the program regions
-//  are used to store the data and followed by the actual data bytes.
-// "e.g. data 5, abcde"
-#define DATA_EXT_OPCODE 43
+// Jumps if the UDP payload content (starting at R0) does not contain the specified QNAME,
+// applying MDNS case insensitivity.
+// R0: Offset to UDP payload content
+// imm1: Opcode
+// imm2: Label offset
+// imm3(u8): Question type (PTR/SRV/TXT/A/AAAA)
+// imm4(bytes): TLV-encoded QNAME list (null-terminated)
+// e.g.: "jdnsqmatch R0,label,0x0c,\002aa\005local\0\0"
+#define JDNSQMATCH_EXT_OPCODE 43
 
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
