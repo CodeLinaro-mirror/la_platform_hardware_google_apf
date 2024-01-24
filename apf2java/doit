@@ -1,0 +1,21 @@
+#!/bin/bash
+clear
+mcedit z.c \
+&& clang -m32 \
+  -std=c89 \
+  -Wall \
+  -Werror \
+  -Werror=implicit-fallthrough \
+  -Werror=strict-prototypes \
+  -Wnullable-to-nonnull-conversion \
+  -Wsign-compare \
+  -Wsign-conversion \
+  -Wthread-safety \
+  -Wunused-parameter \
+  -Wuninitialized \
+  \
+  -O2 \
+  -Os \
+  -fomit-frame-pointer \
+  \
+  z.c -c -o z.o

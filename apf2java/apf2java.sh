@@ -10,6 +10,8 @@ sed -r \
 's@: and +r0, (-?[0-9]+)@: gen.addAnd(\1);@;'\
 's@: add +r0, (-?[0-9]+)@: gen.addAdd(\1);@;'\
 's@: add +r0, r1@: gen.addAddR1();@;'\
+'s@: swap +@: gen.addSwap();@;'\
+'s@: neg +r([01])@: gen.addNeg(R\1);@;'\
 's@: jmp +(PASS|DROP)@: gen.addJump(\1_LABEL);@;'\
 's@: jnebs +r0, 0x([0-9a-f]+), ([0-9]+), ([0-9a-f]+)@: gen.addJumpIfBytesAtR0NotEqual(hexStringToByteArray("\3"), LABEL_\2);@;'\
 's@: jeq +r([01]), 0x([0-9a-f]+), ([0-9]+)@: gen.addJumpIfR\1Equals(0x\2, LABEL_\3);@;'\
