@@ -1,3 +1,7 @@
+typedef int8_t s8;
+typedef int16_t s16;
+typedef int32_t s32;
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -11,6 +15,10 @@ typedef enum {
 
 #define ETH_P_IP	0x0800
 #define ETH_P_IPV6	0x86DD
+
+#ifndef IPPROTO_ICMP
+#define IPPROTO_ICMP	1
+#endif
 
 #ifndef IPPROTO_TCP
 #define IPPROTO_TCP	6

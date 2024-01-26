@@ -7,6 +7,6 @@ static void store_be16(u8* const buf, const u16 v) {
     buf[1] = (u8)v;
 }
 
-static uint8_t uppercase(uint8_t c) {
+static u8 uppercase(u8 c) {
     return (c >= 'a') && (c <= 'z') ? c - ('a' - 'A') : c;
 }
