@@ -17,6 +17,9 @@
 #include <stdint.h>
 #include <stdio.h>
 
+typedef enum { false, true } bool;
+
+#include "v5/apf_defs.h"
 #include "v5/apf.h"
 
 // If "c" is of a signed type, generate a compile warning that gets promoted to an error.

@@ -191,14 +191,18 @@ typedef enum {
 #define MEMORY_ITEMS 16
 /* Upon program execution, some temporary memory slots are prefilled: */
 
-/* Offset inside the output buffer where the next byte of output packet should be written to. */
-#define MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET 10
-#define MEMORY_OFFSET_PROGRAM_SIZE 11     /* Size of program (in bytes) */
-#define MEMORY_OFFSET_DATA_SIZE 12        /* Total size of program + data */
-#define MEMORY_OFFSET_IPV4_HEADER_SIZE 13 /* 4*([APF_FRAME_HEADER_SIZE]&15) */
-#define MEMORY_OFFSET_PACKET_SIZE 14      /* Size of packet in bytes. */
-#define MEMORY_OFFSET_FILTER_AGE 15       /* Age since filter installed in seconds. */
-
+typedef union {
+  struct {
+    u32 pad[10];              /* 0..9 */
+    u32 tx_buf_offset;        /* 10: Offset in tx_buf where next byte will be written */
+    u32 program_size;         /* 11: Size of program (in bytes) */
+    u32 ram_len;              /* 12: Total size of program + data, ie. ram_len */
+    u32 ipv4_header_size;     /* 13: 4*([APF_FRAME_HEADER_SIZE]&15) */
+    u32 packet_size;          /* 14: Size of packet in bytes. */
+    u32 filter_age;           /* 15: Age since filter installed in seconds. */
+  } named;
+  u32 slot[MEMORY_ITEMS];
+} memory_type;
 
 /* Unconditionally pass (if R=0) or drop (if R=1) packet.
  * An optional unsigned immediate value can be provided to encode the counter number.
@@ -596,17 +600,17 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
 /* Accept packet if not within program or not ahead of program counter */
 #define ASSERT_FORWARD_IN_PROGRAM(p) ASSERT_RETURN(IN_PROGRAM_BOUNDS(p) && (p) >= pc)
   /* Memory slot values. */
-  u32 memory[MEMORY_ITEMS] = {};
+  memory_type mem = {};
   /* Fill in pre-filled memory slot values. */
-  memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = 0;
-  memory[MEMORY_OFFSET_PROGRAM_SIZE] = program_len;
-  memory[MEMORY_OFFSET_DATA_SIZE] = ram_len;
-  memory[MEMORY_OFFSET_PACKET_SIZE] = packet_len;
-  memory[MEMORY_OFFSET_FILTER_AGE] = filter_age_16384ths >> 14;
+  mem.named.tx_buf_offset = 0;
+  mem.named.program_size = program_len;
+  mem.named.ram_len = ram_len;
+  mem.named.packet_size = packet_len;
+  mem.named.filter_age = filter_age_16384ths >> 14;
   ASSERT_IN_PACKET_BOUNDS(APF_FRAME_HEADER_SIZE);
   /* Only populate if IP version is IPv4. */
   if ((packet[APF_FRAME_HEADER_SIZE] & 0xf0) == 0x40) {
-      memory[MEMORY_OFFSET_IPV4_HEADER_SIZE] = (packet[APF_FRAME_HEADER_SIZE] & 15) * 4;
+      mem.named.ipv4_header_size = (packet[APF_FRAME_HEADER_SIZE] & 15) * 4;
   }
   /* Register values. */
   u32 registers[2] = {};
@@ -617,13 +621,13 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
   u32 instructions_remaining = program_len;
 
   /* The output buffer pointer */
-  u8* allocated_buffer = NULL;
+  u8* tx_buf = NULL;
   /* The length of the output buffer */
-  u32 allocated_buffer_len = 0;
+  u32 tx_buf_len = 0;
 /* Is access to offset |p| length |size| within output buffer bounds? */
 #define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
-                                 (p) + (size) <= allocated_buffer_len && \
+                                 (p) + (size) <= tx_buf_len && \
                                  (p) + (size) >= (p))
 /* Accept packet if not write within allocated output buffer */
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
@@ -639,7 +643,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
     } while (0)
 
   do {
-      APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, memory, ram_len);
+      APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, mem.slot, ram_len);
       if (pc == program_len) {
           return PASS_PACKET;
       } else if (pc == (program_len + 1)) {
@@ -779,9 +783,9 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                   imm >= LDM_EXT_OPCODE &&
 #endif
                   imm < (LDM_EXT_OPCODE + MEMORY_ITEMS)) {
-                REG = memory[imm - LDM_EXT_OPCODE];
+                REG = mem.slot[imm - LDM_EXT_OPCODE];
               } else if (imm >= STM_EXT_OPCODE && imm < (STM_EXT_OPCODE + MEMORY_ITEMS)) {
-                memory[imm - STM_EXT_OPCODE] = REG;
+                mem.slot[imm - STM_EXT_OPCODE] = REG;
               } else switch (imm) {
                   case NOT_EXT_OPCODE: REG = ~REG;      break;
                   case NEG_EXT_OPCODE: REG = -REG;      break;
@@ -793,37 +797,37 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                     break;
                   }
                   case ALLOCATE_EXT_OPCODE:
-                    ASSERT_RETURN(allocated_buffer == NULL);
+                    ASSERT_RETURN(tx_buf == NULL);
                     if (reg_num == 0) {
-                        allocated_buffer_len = REG;
+                        tx_buf_len = REG;
                     } else {
-                        DECODE_IMM(allocated_buffer_len, 2);
+                        DECODE_IMM(tx_buf_len, 2);
                     }
                     /* checksumming functions requires minimum 74 byte buffer for correctness */
-                    if (allocated_buffer_len < 74) allocated_buffer_len = 74;
-                    allocated_buffer = apf_allocate_buffer(ctx, allocated_buffer_len);
-                    ASSERT_RETURN(allocated_buffer != NULL);
-                    memset(allocated_buffer, 0, allocated_buffer_len);
-                    memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = 0;
+                    if (tx_buf_len < 74) tx_buf_len = 74;
+                    tx_buf = apf_allocate_buffer(ctx, tx_buf_len);
+                    ASSERT_RETURN(tx_buf != NULL);
+                    memset(tx_buf, 0, tx_buf_len);
+                    mem.named.tx_buf_offset = 0;
                     break;
                   case TRANSMITDISCARD_EXT_OPCODE:
-                    ASSERT_RETURN(allocated_buffer != NULL);
-                    u32 pkt_len = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+                    ASSERT_RETURN(tx_buf != NULL);
+                    u32 pkt_len = mem.named.tx_buf_offset;
                     /* If pkt_len > allocate_buffer_len, it means sth. wrong */
-                    /* happened and the allocated_buffer should be deallocated. */
-                    if (pkt_len > allocated_buffer_len) {
-                        apf_transmit_buffer(ctx, allocated_buffer, 0 /* len */, 0 /* dscp */);
-                        allocated_buffer = NULL;
-                        allocated_buffer_len = 0;
+                    /* happened and the tx_buf should be deallocated. */
+                    if (pkt_len > tx_buf_len) {
+                        apf_transmit_buffer(ctx, tx_buf, 0 /* len */, 0 /* dscp */);
+                        tx_buf = NULL;
+                        tx_buf_len = 0;
                         return PASS_PACKET;
                     }
-                    /* allocated_buffer_len cannot be large because we'd run out of RAM, */
+                    /* tx_buf_len cannot be large because we'd run out of RAM, */
                     /* so the above unsigned comparison effectively guarantees casting pkt_len */
                     /* to a signed value does not result in it going negative. */
-                    int dscp = calculate_checksum_and_return_dscp(allocated_buffer, (s32)pkt_len);
-                    int ret = apf_transmit_buffer(ctx, allocated_buffer, pkt_len, dscp);
-                    allocated_buffer = NULL;
-                    allocated_buffer_len = 0;
+                    int dscp = calculate_checksum_and_return_dscp(tx_buf, (s32)pkt_len);
+                    int ret = apf_transmit_buffer(ctx, tx_buf, pkt_len, dscp);
+                    tx_buf = NULL;
+                    tx_buf_len = 0;
                     if (ret) {
                       return PASS_PACKET;
                     }
@@ -890,27 +894,27 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
               break;
           }
           case WRITE_OPCODE: {
-              ASSERT_RETURN(allocated_buffer != NULL);
+              ASSERT_RETURN(tx_buf != NULL);
               ASSERT_RETURN(len_field > 0);
-              u32 offs = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+              u32 offs = mem.named.tx_buf_offset;
               const u32 write_len = 1 << (len_field - 1);
               ASSERT_RETURN(write_len > 0);
               ASSERT_IN_OUTPUT_BOUNDS(offs, write_len);
               u32 i;
               for (i = 0; i < write_len; ++i) {
-                  *(allocated_buffer + offs) =
+                  *(tx_buf + offs) =
                       (u8) ((imm >> (write_len - 1 - i) * 8) & 0xff);
                   offs++;
               }
-              memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = offs;
+              mem.named.tx_buf_offset = offs;
               break;
           }
           case PKTDATACOPY_OPCODE: {
-              ASSERT_RETURN(allocated_buffer != NULL);
+              ASSERT_RETURN(tx_buf != NULL);
               u32 src_offs = imm;
               u32 copy_len;
               DECODE_IMM(copy_len, 1);
-              u32 dst_offs = memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET];
+              u32 dst_offs = mem.named.tx_buf_offset;
               ASSERT_IN_OUTPUT_BOUNDS(dst_offs, copy_len);
               /* reg_num == 0 copy from packet, reg_num == 1 copy from data. */
               if (reg_num == 0) {
@@ -918,13 +922,13 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                   const u32 last_packet_offs = src_offs + copy_len - 1;
                   ASSERT_RETURN(last_packet_offs >= src_offs);
                   ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                  memmove(allocated_buffer + dst_offs, packet + src_offs, copy_len);
+                  memmove(tx_buf + dst_offs, packet + src_offs, copy_len);
               } else {
                   ASSERT_IN_RAM_BOUNDS(src_offs + copy_len - 1);
-                  memmove(allocated_buffer + dst_offs, program + src_offs, copy_len);
+                  memmove(tx_buf + dst_offs, program + src_offs, copy_len);
               }
               dst_offs += copy_len;
-              memory[MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET] = dst_offs;
+              mem.named.tx_buf_offset = dst_offs;
               break;
           }
           default:  /* Unknown opcode */

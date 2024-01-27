@@ -126,14 +126,18 @@
 #define MEMORY_ITEMS 16
 // Upon program execution, some temporary memory slots are prefilled:
 
-// Offset inside the output buffer where the next byte of output packet should be written to.
-#define MEMORY_OFFSET_OUTPUT_BUFFER_OFFSET 10
-#define MEMORY_OFFSET_PROGRAM_SIZE 11     // Size of program (in bytes)
-#define MEMORY_OFFSET_DATA_SIZE 12        // Total size of program + data
-#define MEMORY_OFFSET_IPV4_HEADER_SIZE 13 // 4*([APF_FRAME_HEADER_SIZE]&15)
-#define MEMORY_OFFSET_PACKET_SIZE 14      // Size of packet in bytes.
-#define MEMORY_OFFSET_FILTER_AGE 15       // Age since filter installed in seconds.
-
+typedef union {
+  struct {
+    u32 pad[10];              // 0..9
+    u32 tx_buf_offset;        // 10: Offset in tx_buf where next byte will be written
+    u32 program_size;         // 11: Size of program (in bytes)
+    u32 ram_len;              // 12: Total size of program + data, ie. ram_len
+    u32 ipv4_header_size;     // 13: 4*([APF_FRAME_HEADER_SIZE]&15)
+    u32 packet_size;          // 14: Size of packet in bytes.
+    u32 filter_age;           // 15: Age since filter installed in seconds.
+  } named;
+  u32 slot[MEMORY_ITEMS];
+} memory_type;
 
 /* Unconditionally pass (if R=0) or drop (if R=1) packet.
  * An optional unsigned immediate value can be provided to encode the counter number.
