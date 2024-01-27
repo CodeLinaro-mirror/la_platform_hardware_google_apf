@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <gtest/gtest.h>
 #include <arpa/inet.h>
+#include <linux/udp.h>
+#include <linux/icmpv6.h>
 #include "apf_defs.h"
 #include "apf_utils.h"
 #include "apf_checksum.h"
@@ -22,7 +24,7 @@ TEST(ApfChecksumTest, CalcIPv4UDPChecksum) {
         0x04, 0xc0, 0xa8, 0x01, 0x09,
     };
     // Set the UDP checksum to UDP payload size
-    *(uint16_t*) (ether_ipv4_udp_pkt + 40) = htons(sizeof(ether_ipv4_udp_pkt) - 20 - 14);
+    *(uint16_t*) (ether_ipv4_udp_pkt + ETH_HLEN + IPV4_HLEN + offsetof(udphdr, check)) = htons(sizeof(ether_ipv4_udp_pkt) - IPV4_HLEN - ETH_HLEN);
     uint8_t dscp = calculate_checksum_and_return_dscp(ether_ipv4_udp_pkt, sizeof(ether_ipv4_udp_pkt));
     EXPECT_EQ(dscp, 0);
     // Verify IPv4 header checksum
@@ -51,7 +53,7 @@ TEST(ApfChecksumTest, CalcIPv6UDPChecksum) {
         0x09
     };
     // Set the UDP checksum to UDP payload size
-    *(uint16_t*) (ether_ipv6_udp_pkt + 60) = htons(sizeof(ether_ipv6_udp_pkt) - 40 - 14);
+    *(uint16_t*) (ether_ipv6_udp_pkt + ETH_HLEN + IPV6_HLEN + offsetof(udphdr, check)) = htons(sizeof(ether_ipv6_udp_pkt) - IPV6_HLEN - ETH_HLEN);
     uint8_t dscp = calculate_checksum_and_return_dscp(ether_ipv6_udp_pkt, sizeof(ether_ipv6_udp_pkt));
     EXPECT_EQ(dscp, 0);
     // verify UDP checksum
@@ -74,7 +76,7 @@ TEST(ApfChecksumTest, CalcICMPv6Checksum) {
         0x12, 0xb7, 0x90, 0xb6, 0xe9, 0xd2
     };
     // Set the ICMPv6 checksum to ICMPv6 payload size
-    *(uint16_t*) (ether_ipv6_icmp6_pkt + 56) = htons(sizeof(ether_ipv6_icmp6_pkt) - 40 - 14);
+    *(uint16_t*) (ether_ipv6_icmp6_pkt + ETH_HLEN + IPV6_HLEN + offsetof(icmp6hdr, icmp6_cksum)) = htons(sizeof(ether_ipv6_icmp6_pkt) - IPV6_HLEN - ETH_HLEN);
     uint8_t dscp = calculate_checksum_and_return_dscp(ether_ipv6_icmp6_pkt, sizeof(ether_ipv6_icmp6_pkt));
     EXPECT_EQ(dscp, 0);
     // verify layer 4 checksum

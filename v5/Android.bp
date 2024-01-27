@@ -45,28 +45,6 @@ cc_library_static {
     sdk_version: "24",
 }
 
-cc_test_host {
-    name: "apfv5_test",
-    srcs: [
-        "apf_interpreter.c",
-        "test_buf_allocator.c",
-        "apf_interpreter_test.cc",
-    ],
-    cflags: [
-        "-Wall",
-        "-Werror",
-        "-Werror=implicit-fallthrough",
-        "-Werror=strict-prototypes",
-        "-Wnullable-to-nonnull-conversion",
-        "-Wsign-compare",
-        "-Wsign-conversion",
-        "-Wthread-safety",
-        "-Wunused-parameter",
-        "-Wuninitialized",
-    ],
-    stl: "c++_static",
-}
-
 sh_test_host {
     name: "apf_assemble_test",
     src: "apf_interpreter_assemble.sh",

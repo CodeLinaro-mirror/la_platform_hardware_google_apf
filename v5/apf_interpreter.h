@@ -130,4 +130,4 @@ int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
 }
 #endif
 
-#endif  // APF_INTERPRETER_V5_H_
+#endif  /* APF_INTERPRETER_V5_H_ */

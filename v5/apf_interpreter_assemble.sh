@@ -22,7 +22,9 @@ do_assemble() {
     else
       echo "${line}"
     fi
-  done < apf_interpreter_source.c
+  done < apf_interpreter_source.c \
+  | sed -r 's@(^|[^:])//(.*)$@\1/*\2 */@'
+  # The above sed converts // comments into /* */ comments for c89
 }
 
 do_test() {

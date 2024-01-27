@@ -5,6 +5,8 @@
 set -e
 set -u
 
+cd "${0%/*}"
+
 declare -ar FLAGS=(
   '-std=c89'
   '-Wall'
