@@ -91,6 +91,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
   mem.named.ram_len = ram_len;
   mem.named.packet_size = packet_len;
   mem.named.filter_age = filter_age_16384ths >> 14;
+  mem.named.filter_age_16384ths = filter_age_16384ths;
   ASSERT_IN_PACKET_BOUNDS(APF_FRAME_HEADER_SIZE);
   // Only populate if IP version is IPv4.
   if ((packet[APF_FRAME_HEADER_SIZE] & 0xf0) == 0x40) {
@@ -329,7 +330,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                                                 packet_len - udp_payload_offset,
                                                 qtype);
                     if (match_rst == -1) return PASS_PACKET;
-                    while (!(program[pc] == 0 && program[pc + 1] == 0)) {
+                    while (pc + 1 < program_len && !(program[pc] == 0 && program[pc + 1] == 0)) {
                         pc++;
                     }
                     pc += 2;

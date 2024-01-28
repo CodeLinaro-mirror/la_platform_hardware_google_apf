@@ -16,22 +16,37 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdarg.h>
 
 typedef enum { false, true } bool;
 
 #include "v5/apf_defs.h"
 #include "v5/apf.h"
+#include "disassembler.h"
 
 // If "c" is of a signed type, generate a compile warning that gets promoted to an error.
 // This makes bounds checking simpler because ">= 0" can be avoided. Otherwise adding
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
-static int print_opcode(const char* opcode, char* output_buffer,
-                        int output_buffer_len, int offset) {
-    int ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                      "%-12s", opcode);
-    return ret;
+char print_buf[512];
+char* buf_ptr;
+int buf_remain;
+
+__attribute__ ((format (printf, 1, 2) ))
+static void bprintf(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    int ret = vsnprintf(buf_ptr, buf_remain, format, args);
+    va_end(args);
+    if (ret < 0) return;
+    if (ret >= buf_remain) ret = buf_remain;
+    buf_ptr += ret;
+    buf_remain -= ret;
+}
+
+static void print_opcode(const char* opcode) {
+    bprintf("%-12s", opcode);
 }
 
 // Mapping from opcode number to opcode name.
@@ -61,64 +76,45 @@ static const char* opcode_names [] = {
     [WRITE_OPCODE] = "write",
 };
 
-static int print_jump_target(uint32_t target, uint32_t program_len,
-                             char* output_buffer, int output_buffer_len,
-                             int offset) {
-    int ret;
+static void print_jump_target(uint32_t target, uint32_t program_len) {
     if (target == program_len) {
-        ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "PASS");
+        bprintf("PASS");
     } else if (target == program_len + 1) {
-        ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "DROP");
+        bprintf("DROP");
     } else {
-        ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "%u", target);
+        bprintf("%u", target);
     }
-    return ret;
 }
 
-uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
-                         uint32_t pc, char* output_buffer,
-                         int output_buffer_len) {
-    if (pc > program_len + 1) {
-        fprintf(stderr, "pc is overflow: pc %d, program_len: %d", pc,
-                program_len);
-        return pc;
-    }
-#define ASSERT_RET_INBOUND(x)                                               \
-    if ((x) < 0 || (x) >= (output_buffer_len - offset)) return pc + 2
-
-    int offset = 0;
-    int ret;
-    ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "%8u: ", pc);
-    ASSERT_RET_INBOUND(ret);
-    offset += ret;
-
-    if (pc == program_len) {
-        ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "PASS");
-        ASSERT_RET_INBOUND(ret);
-        offset += ret;
-        return ++pc;
+const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const pc) {
+    buf_ptr = print_buf;
+    buf_remain = sizeof(print_buf);
+    if (*pc > program_len + 1) {
+        bprintf("pc is overflow: pc %d, program_len: %d", *pc, program_len);
+        return print_buf;
     }
 
-    if (pc == program_len + 1) {
-        ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                       "DROP");
-        ASSERT_RET_INBOUND(ret);
-        offset += ret;
-        return ++pc;
+    bprintf("%8u: ", *pc);
+
+    if (*pc == program_len) {
+        bprintf("PASS");
+        ++(*pc);
+        return print_buf;
     }
 
-    const uint8_t bytecode = program[pc++];
+    if (*pc == program_len + 1) {
+        bprintf("DROP");
+        ++(*pc);
+        return print_buf;
+    }
+
+    const uint8_t bytecode = program[(*pc)++];
     const uint32_t opcode = EXTRACT_OPCODE(bytecode);
-#define PRINT_OPCODE()                                                         \
-    print_opcode(opcode_names[opcode], output_buffer, output_buffer_len, offset)
+
+#define PRINT_OPCODE() print_opcode(opcode_names[opcode])
 #define DECODE_IMM(value, length)                                              \
-    for (uint32_t i = 0; i < (length) && pc < program_len; i++)                \
-        value = (value << 8) | program[pc++]
+    for (uint32_t i = 0; i < (length) && *pc < program_len; i++)               \
+        value = (value << 8) | program[(*pc)++]
 
     const uint32_t reg_num = EXTRACT_REGISTER(bytecode);
     // All instructions have immediate fields, so load them now.
@@ -136,42 +132,22 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
         case LDB_OPCODE:
         case LDH_OPCODE:
         case LDW_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
-            ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                          "r%d, [%u]", reg_num, imm);
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
+            bprintf("r%d, [%u]", reg_num, imm);
             break;
         case LDBX_OPCODE:
         case LDHX_OPCODE:
         case LDWX_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
             if (imm) {
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "r%d, [r1+%u]", reg_num, imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r%d, [r1+%u]", reg_num, imm);
             } else {
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "r%d, [r1]", reg_num);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r%d, [r1]", reg_num);
             }
             break;
         case JMP_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
-            ret = print_jump_target(pc + imm, program_len, output_buffer,
-                                    output_buffer_len, offset);
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
+            print_jump_target(*pc + imm, program_len);
             break;
         case JEQ_OPCODE:
         case JNE_OPCODE:
@@ -179,71 +155,36 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
         case JLT_OPCODE:
         case JSET_OPCODE:
         case JNEBS_OPCODE: {
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
-            ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                          "r0, ");
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
+            bprintf("r0, ");
             // Load second immediate field.
             uint32_t cmp_imm = 0;
             if (reg_num == 1) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r1, ");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r1, ");
             } else if (len_field == 0) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "0, ");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("0, ");
             } else {
                 DECODE_IMM(cmp_imm, 1 << (len_field - 1));
-                ret = snprintf(output_buffer + offset,
-                              output_buffer_len - offset, "0x%x, ", cmp_imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("0x%x, ", cmp_imm);
             }
             if (opcode == JNEBS_OPCODE) {
-                ret = print_jump_target(pc + imm + cmp_imm, program_len,
-                                  output_buffer, output_buffer_len, offset);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, ", ");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                print_jump_target(*pc + imm + cmp_imm, program_len);
+                bprintf(", ");
                 while (cmp_imm--) {
-                    uint8_t byte = program[pc++];
-                    ret = snprintf(output_buffer + offset,
-                                  output_buffer_len - offset, "%02x", byte);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    uint8_t byte = program[(*pc)++];
+                    bprintf("%02x", byte);
                 }
             } else {
-                ret = print_jump_target(pc + imm, program_len, output_buffer,
-                                  output_buffer_len, offset);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                print_jump_target(*pc + imm, program_len);
             }
             break;
         }
         case SH_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
             if (reg_num) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r0, r1");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r0, r1");
             } else {
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "r0, %d", signed_imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r0, %d", signed_imm);
             }
             break;
         case ADD_OPCODE:
@@ -251,34 +192,18 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
         case DIV_OPCODE:
         case AND_OPCODE:
         case OR_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
             if (reg_num) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r0, r1");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r0, r1");
             } else if (!imm && opcode == DIV_OPCODE) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "pass (div 0)");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("pass (div 0)");
             } else {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r0, %u", imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r0, %u", imm);
             }
             break;
         case LI_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
-            ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                           "r%d, %d", reg_num, signed_imm);
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
+            bprintf("r%d, %d", reg_num, signed_imm);
             break;
         case EXT_OPCODE:
             if (
@@ -290,111 +215,49 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                 imm >= LDM_EXT_OPCODE &&
 #endif
                 imm < (LDM_EXT_OPCODE + MEMORY_ITEMS)) {
-                ret = print_opcode("ldm", output_buffer, output_buffer_len,
-                                   offset);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "r%d, m[%u]", reg_num, imm - LDM_EXT_OPCODE);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                print_opcode("ldm");
+                bprintf("r%d, m[%u]", reg_num, imm - LDM_EXT_OPCODE);
             } else if (imm >= STM_EXT_OPCODE && imm < (STM_EXT_OPCODE + MEMORY_ITEMS)) {
-                ret = print_opcode("stm", output_buffer, output_buffer_len,
-                                   offset);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "r%d, m[%u]", reg_num, imm - STM_EXT_OPCODE);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                print_opcode("stm");
+                bprintf("r%d, m[%u]", reg_num, imm - STM_EXT_OPCODE);
             } else switch (imm) {
                 case NOT_EXT_OPCODE:
-                    ret = print_opcode("not", output_buffer,
-                                       output_buffer_len, offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret = snprintf(output_buffer + offset,
-                                   output_buffer_len - offset, "r%d",
-                                   reg_num);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("not");
+                    bprintf("r%d", reg_num);
                     break;
                 case NEG_EXT_OPCODE:
-                    ret = print_opcode("neg", output_buffer, output_buffer_len,
-                                       offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret = snprintf(output_buffer + offset,
-                                  output_buffer_len - offset, "r%d", reg_num);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("neg");
+                    bprintf("r%d", reg_num);
                     break;
                 case SWAP_EXT_OPCODE:
-                    ret = print_opcode("swap", output_buffer, output_buffer_len,
-                                       offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("swap");
                     break;
                 case MOV_EXT_OPCODE:
-                    ret = print_opcode("mov", output_buffer, output_buffer_len,
-                                       offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret = snprintf(output_buffer + offset,
-                                   output_buffer_len - offset, "r%d, r%d",
-                                   reg_num, reg_num ^ 1);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("mov");
+                    bprintf("r%d, r%d", reg_num, reg_num ^ 1);
                     break;
                 case ALLOCATE_EXT_OPCODE:
-                    ret = print_opcode("alloc", output_buffer,
-                                       output_buffer_len, offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret =
-                        snprintf(output_buffer + offset,
-                                 output_buffer_len - offset, "r%d", reg_num);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("alloc");
+                    bprintf("r%d", reg_num);
                     break;
                 case TRANSMITDISCARD_EXT_OPCODE:
-                    ret = print_opcode("trans", output_buffer,
-                                       output_buffer_len, offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret =
-                        snprintf(output_buffer + offset,
-                                 output_buffer_len - offset, "r%d", reg_num);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("trans");
+                    bprintf("r%d", reg_num);
                     break;
                 case EWRITE1_EXT_OPCODE:
                 case EWRITE2_EXT_OPCODE:
                 case EWRITE4_EXT_OPCODE: {
-                    ret = print_opcode("write", output_buffer,
-                                       output_buffer_len, offset);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
-                    ret = snprintf(output_buffer + offset,
-                                   output_buffer_len - offset, "r%d, %d",
-                                   reg_num, 1 << (imm - EWRITE1_EXT_OPCODE));
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    print_opcode("write");
+                    bprintf("r%d, %d", reg_num, 1 << (imm - EWRITE1_EXT_OPCODE));
                     break;
                 }
                 case EDATACOPY_EXT_OPCODE:
                 case EPKTCOPY_EXT_OPCODE: {
                     if (imm == EPKTCOPY_EXT_OPCODE) {
-                        ret = print_opcode("pcopy", output_buffer,
-                                           output_buffer_len, offset);
+                        print_opcode("pcopy");
                     } else {
-                        ret = print_opcode("dcopy", output_buffer,
-                                           output_buffer_len, offset);
+                        print_opcode("dcopy");
                     }
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
                     if (len_field > 0) {
                         const uint32_t imm_len = 1 << (len_field - 1);
                         uint32_t relative_offs = 0;
@@ -402,99 +265,58 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                         uint32_t copy_len = 0;
                         DECODE_IMM(copy_len, 1);
 
-                        ret = snprintf(
-                            output_buffer + offset, output_buffer_len - offset,
-                            "[r%u+%d], %d", reg_num, relative_offs, copy_len);
-                        ASSERT_RET_INBOUND(ret);
-                        offset += ret;
+                        bprintf("[r%u+%d], %d", reg_num, relative_offs, copy_len);
                     }
                     break;
                 }
                 default:
-                    ret = snprintf(output_buffer + offset,
-                                   output_buffer_len - offset, "unknown_ext %u",
-                                   imm);
-                    ASSERT_RET_INBOUND(ret);
-                    offset += ret;
+                    bprintf("unknown_ext %u", imm);
                     break;
             }
             break;
         case LDDW_OPCODE:
         case STDW_OPCODE:
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
             if (signed_imm > 0) {
-                ret = snprintf(output_buffer + offset,
-                           output_buffer_len - offset, "r%u, [r%u+%d]", reg_num,
-                           reg_num ^ 1, signed_imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r%u, [r%u+%d]", reg_num, reg_num ^ 1, signed_imm);
             } else if (signed_imm < 0) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r%u, [r%u-%d]",
-                               reg_num, reg_num ^ 1, -signed_imm);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r%u, [r%u-%d]", reg_num, reg_num ^ 1, -signed_imm);
             } else {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "r%u, [r%u]", reg_num,
-                               reg_num ^ 1);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("r%u, [r%u]", reg_num, reg_num ^ 1);
             }
             break;
         case WRITE_OPCODE: {
-            ret = PRINT_OPCODE();
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            PRINT_OPCODE();
             uint32_t write_len = 1 << (len_field - 1);
             if (write_len > 0) {
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "0x");
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("0x");
             }
             for (uint32_t i = 0; i < write_len; ++i) {
                 uint8_t byte =
                     (uint8_t) ((imm >> (write_len - 1 - i) * 8) & 0xff);
-                ret = snprintf(output_buffer + offset,
-                               output_buffer_len - offset, "%02x", byte);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("%02x", byte);
 
             }
             break;
         }
         case PKTDATACOPY_OPCODE: {
             if (reg_num == 0) {
-                ret = print_opcode("pcopy", output_buffer, output_buffer_len,
-                                   offset);
+                print_opcode("pcopy");
             } else {
-                ret = print_opcode("dcopy", output_buffer, output_buffer_len,
-                                   offset);
+                print_opcode("dcopy");
             }
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
             if (len_field > 0) {
                 uint32_t src_offs = imm;
                 uint32_t copy_len = 0;
                 DECODE_IMM(copy_len, 1);
-                ret =
-                    snprintf(output_buffer + offset, output_buffer_len - offset,
-                             "%d, %d", src_offs, copy_len);
-                ASSERT_RET_INBOUND(ret);
-                offset += ret;
+                bprintf("%d, %d", src_offs, copy_len);
             }
             break;
         }
         // Unknown opcode
         default:
-            ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                           "unknown %u", opcode);
-            ASSERT_RET_INBOUND(ret);
-            offset += ret;
+            bprintf("unknown %u", opcode);
             break;
     }
-    return pc;
+    return print_buf;
 }

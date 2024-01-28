@@ -128,7 +128,8 @@
 
 typedef union {
   struct {
-    u32 pad[10];              // 0..9
+    u32 pad[9];               // 0..8
+    u32 filter_age_16384ths;  // 9:  Age since filter installed in 1/16384 seconds.
     u32 tx_buf_offset;        // 10: Offset in tx_buf where next byte will be written
     u32 program_size;         // 11: Size of program (in bytes)
     u32 ram_len;              // 12: Total size of program + data, ie. ram_len
