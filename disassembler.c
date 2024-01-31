@@ -270,13 +270,9 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                         print_opcode("transmit");
                     }
                     break;
-                case EWRITE1_EXT_OPCODE:
-                case EWRITE2_EXT_OPCODE:
-                case EWRITE4_EXT_OPCODE: {
-                    print_opcode("write");
-                    bprintf("r%d, %d", reg_num, 1 << (imm - EWRITE1_EXT_OPCODE));
-                    break;
-                }
+                case EWRITE1_EXT_OPCODE: print_opcode("ewrite1"); bprintf("r%d", reg_num); break;
+                case EWRITE2_EXT_OPCODE: print_opcode("ewrite2"); bprintf("r%d", reg_num); break;
+                case EWRITE4_EXT_OPCODE: print_opcode("ewrite4"); bprintf("r%d", reg_num); break;
                 case EDATACOPY_EXT_OPCODE:
                 case EPKTCOPY_EXT_OPCODE: {
                     if (imm == EPKTCOPY_EXT_OPCODE) {
@@ -331,12 +327,10 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
             } else {
                 print_opcode("dcopy");
             }
-            if (len_field > 0) {
-                uint32_t src_offs = imm;
-                uint32_t copy_len = 0;
-                DECODE_IMM(copy_len, 1);
-                bprintf("%d, %d", src_offs, copy_len);
-            }
+            uint32_t src_offs = imm;
+            uint32_t copy_len = 0;
+            DECODE_IMM(copy_len, 1);
+            bprintf("%d, %d", src_offs, copy_len);
             break;
         }
         // Unknown opcode
