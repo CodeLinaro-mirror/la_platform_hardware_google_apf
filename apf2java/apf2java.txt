@@ -1,0 +1,112 @@
+       0: li          r1, -4
+       2: lddw        r0, [r1]
+       3: add         r0, 1
+       5: stdw        r0, [r1]
+       6: ldh         r0, [12]
+       8: li          r1, -108
+      10: jlt         r0, 0x600, 345
+      15: li          r1, -112
+      17: jeq         r0, 0x88a2, 345
+      22: jeq         r0, 0x88a4, 345
+      27: jeq         r0, 0x88b8, 345
+      32: jeq         r0, 0x88cd, 345
+      37: jeq         r0, 0x88e1, 345
+      42: jeq         r0, 0x88e3, 345
+      47: jne         r0, 0x806, 115
+      52: li          r0, 14
+      54: li          r1, -36
+      56: jnebs       r0, 0x6, 339, 000108000604
+      67: ldh         r0, [20]
+      69: jeq         r0, 0x1, 100
+      72: li          r1, -40
+      74: jne         r0, 0x2, 339
+      79: ldw         r0, [28]
+      81: li          r1, -116
+      83: jeq         r0, 0x0, 345
+      88: li          r0, 0
+      89: li          r1, -44
+      91: jnebs       r0, 0x6, 339, ffffffffffff
+     100: li          r0, 38
+     102: li          r1, -68
+     104: jnebs       r0, 0x4, 345, c0a801be
+     111: li          r1, -8
+     113: jmp         339
+     115: ldh         r0, [12]
+     117: jne         r0, 0x800, 263
+     122: ldb         r0, [23]
+     124: jne         r0, 0x11, 157
+     127: ldh         r0, [20]
+     129: jset        r0, 0x1fff, 157
+     134: ldm         r1, m[13]
+     136: ldhx        r0, [r1+16]
+     138: jne         r0, 0x44, 157
+     141: li          r0, 50
+     143: add         r0, r1
+     144: jnebs       r0, 0x6, 157, ea42226789c0
+     153: li          r1, -12
+     155: jmp         339
+     157: ldb         r0, [30]
+     159: and         r0, 240
+     161: li          r1, -84
+     163: jeq         r0, 0xe0, 345
+     166: li          r1, -76
+     168: ldw         r0, [30]
+     170: jeq         r0, 0xffffffff, 345
+     179: li          r1, -80
+     181: jeq         r0, 0xc0a801ff, 345
+     190: ldb         r0, [23]
+     192: jne         r0, 0x11, 243
+     195: li          r0, 26
+     197: jnebs       r0, 0x8, 243, 6b7a1f1fc0a801be
+     208: ldm         r0, m[13]
+     210: add         r0, 8
+     212: swap        
+     214: ldh         r0, [16]
+     216: neg         r1
+     218: add         r0, r1
+     219: jne         r0, 0x1, 243
+     222: ldm         r0, m[13]
+     224: add         r0, 14
+     226: jnebs       r0, 0x4, 243, 1194ceca
+     233: add         r0, 8
+     235: jnebs       r0, 0x1, 243, ff
+     239: li          r1, -128
+     241: jmp         345
+     243: li          r1, -24
+     245: li          r0, 0
+     246: jnebs       r0, 0x6, 339, ffffffffffff
+     255: li          r1, -72
+     257: jmp         345
+     259: li          r1, -16
+     261: jmp         339
+     263: jeq         r0, 0x86dd, 284
+     268: li          r0, 0
+     269: li          r1, -48
+     271: jnebs       r0, 0x6, 339, ffffffffffff
+     280: li          r1, -56
+     282: jmp         345
+     284: ldb         r0, [20]
+     286: jeq         r0, 0x0, 339
+     289: jeq         r0, 0x3a, 303
+     292: li          r1, -104
+     294: ldb         r0, [38]
+     296: jeq         r0, 0xff, 345
+     299: li          r1, -32
+     301: jmp         339
+     303: ldb         r0, [54]
+     305: li          r1, -88
+     307: jeq         r0, 0x85, 345
+     310: jne         r0, 0x88, 337
+     313: li          r0, 38
+     315: jnebs       r0, 0xf, 337, ff0200000000000000000000000000
+     333: li          r1, -92
+     335: jmp         345
+     337: li          r1, -28
+     339: lddw        r0, [r1]
+     340: add         r0, 1
+     342: stdw        r0, [r1]
+     343: jmp         PASS
+     345: lddw        r0, [r1]
+     346: add         r0, 1
+     348: stdw        r0, [r1]
+     349: jmp         DROP

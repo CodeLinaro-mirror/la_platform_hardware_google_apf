@@ -345,7 +345,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                     ASSERT_RET_INBOUND(ret);
                     offset += ret;
                     break;
-                case ALLOC_EXT_OPCODE:
+                case ALLOCATE_EXT_OPCODE:
                     ret = print_opcode("alloc", output_buffer,
                                        output_buffer_len, offset);
                     ASSERT_RET_INBOUND(ret);
@@ -356,7 +356,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                     ASSERT_RET_INBOUND(ret);
                     offset += ret;
                     break;
-                case TRANS_EXT_OPCODE:
+                case TRANSMITDISCARD_EXT_OPCODE:
                     ret = print_opcode("trans", output_buffer,
                                        output_buffer_len, offset);
                     ASSERT_RET_INBOUND(ret);
@@ -381,9 +381,9 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
                     offset += ret;
                     break;
                 }
-                case EDATACOPY:
-                case EPKTCOPY: {
-                    if (imm == EPKTCOPY) {
+                case EDATACOPY_EXT_OPCODE:
+                case EPKTCOPY_EXT_OPCODE: {
+                    if (imm == EPKTCOPY_EXT_OPCODE) {
                         ret = print_opcode("pcopy", output_buffer,
                                            output_buffer_len, offset);
                     } else {
@@ -463,7 +463,7 @@ uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
             }
             break;
         }
-        case MEMCOPY_OPCODE: {
+        case PKTDATACOPY_OPCODE: {
             if (reg_num == 0) {
                 ret = print_opcode("pcopy", output_buffer, output_buffer_len,
                                    offset);

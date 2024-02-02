@@ -162,7 +162,7 @@ void maybe_print_tracing_header() {
 
 void print_transmitted_packet() {
     printf("transmitted packet: ");
-    print_hex(apf_test_tx_packet, (int) apf_test_tx_packet_len);
+    print_hex(apf_test_buffer, (int) apf_test_tx_packet_len);
     printf("\n");
 }
 

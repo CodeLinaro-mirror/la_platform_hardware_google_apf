@@ -22,7 +22,6 @@
 #define APF_TX_BUFFER_SIZE 1500
 
 extern uint8_t apf_test_buffer[APF_TX_BUFFER_SIZE];
-extern uint8_t apf_test_tx_packet[APF_TX_BUFFER_SIZE];
 extern uint32_t apf_test_tx_packet_len;
 extern uint8_t apf_test_tx_dscp;
 
