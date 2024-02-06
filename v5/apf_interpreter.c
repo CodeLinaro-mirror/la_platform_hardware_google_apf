@@ -284,13 +284,14 @@ typedef union {
 #define EWRITE4_EXT_OPCODE 40
 /* Copy bytes from input packet/APF program/data region to output buffer and
  * auto-increment the output buffer pointer.
- * The copy src offset is stored in R0.
- * when R=0, the copy length is stored in (u8)imm2.
- * when R=1, the copy length is stored in R1.
- * e.g. "pktcopy r0, 5", "pktcopy r0, r1", "datacopy r0, 5", "datacopy r0, r1"
+ * Register bit is used to specify the source of data copy.
+ * R=0 means copy from packet.
+ * R=1 means copy from APF program/data region.
+ * The source offset is stored in R0, copy length is stored in u8 imm2 or R1.
+ * e.g. "epktcopy r0, 16", "edatacopy r0, 16", "epktcopy r0, r1", "edatacopy r0, r1"
  */
-#define EPKTCOPY_EXT_OPCODE 41
-#define EDATACOPY_EXT_OPCODE 42
+#define EPKTDATACOPYIMM_EXT_OPCODE 41
+#define EPKTDATACOPYR1_EXT_OPCODE 42
 /* Jumps if the UDP payload content (starting at R0) does not contain the specified QNAME,
  * applying MDNS case insensitivity.
  * R0: Offset to UDP payload content

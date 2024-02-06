@@ -161,7 +161,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 print_jump_target(*pc + imm, program_len);
             } else {
                 print_opcode("data");
-                bprintf("%d,", imm);
+                bprintf("%d, ", imm);
                 uint32_t len = imm;
                 while (len--) bprintf("%02x", program[(*pc)++]);
             }
@@ -170,8 +170,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
         case JNE_OPCODE:
         case JGT_OPCODE:
         case JLT_OPCODE:
-        case JSET_OPCODE:
-        case JNEBS_OPCODE: {
+        case JSET_OPCODE: {
             PRINT_OPCODE();
             bprintf("r0, ");
             // Load second immediate field.
@@ -184,15 +183,24 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 DECODE_IMM(cmp_imm, 1 << (len_field - 1));
                 bprintf("0x%x, ", cmp_imm);
             }
-            if (opcode == JNEBS_OPCODE) {
-                print_jump_target(*pc + imm + cmp_imm, program_len);
-                bprintf(", ");
-                while (cmp_imm--) {
-                    uint8_t byte = program[(*pc)++];
-                    bprintf("%02x", byte);
-                }
+            print_jump_target(*pc + imm, program_len);
+            break;
+        }
+        case JNEBS_OPCODE: {
+            if (reg_num == 0) {
+                PRINT_OPCODE();
             } else {
-                print_jump_target(*pc + imm, program_len);
+                print_opcode("jebs");
+            }
+            bprintf("r0, ");
+            uint32_t cmp_imm = 0;
+            DECODE_IMM(cmp_imm, 1 << (len_field - 1));
+            bprintf("0x%x, ", cmp_imm);
+            print_jump_target(*pc + imm + cmp_imm, program_len);
+            bprintf(", ");
+            while (cmp_imm--) {
+                uint8_t byte = program[(*pc)++];
+                bprintf("%02x", byte);
             }
             break;
         }
@@ -273,21 +281,44 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 case EWRITE1_EXT_OPCODE: print_opcode("ewrite1"); bprintf("r%d", reg_num); break;
                 case EWRITE2_EXT_OPCODE: print_opcode("ewrite2"); bprintf("r%d", reg_num); break;
                 case EWRITE4_EXT_OPCODE: print_opcode("ewrite4"); bprintf("r%d", reg_num); break;
-                case EDATACOPY_EXT_OPCODE:
-                case EPKTCOPY_EXT_OPCODE: {
-                    if (imm == EPKTCOPY_EXT_OPCODE) {
-                        print_opcode("pcopy");
+                case EPKTDATACOPYIMM_EXT_OPCODE:
+                case EPKTDATACOPYR1_EXT_OPCODE: {
+                    if (reg_num == 0) {
+                        print_opcode("epktcopy");
                     } else {
-                        print_opcode("dcopy");
+                        print_opcode("edatacopy");
                     }
-                    if (len_field > 0) {
-                        const uint32_t imm_len = 1 << (len_field - 1);
-                        uint32_t relative_offs = 0;
-                        DECODE_IMM(relative_offs, imm_len);
-                        uint32_t copy_len = 0;
-                        DECODE_IMM(copy_len, 1);
+                    if (imm == EPKTDATACOPYIMM_EXT_OPCODE) {
+                      uint32_t len = 0;
+                      DECODE_IMM(len, 1);
+                        bprintf(" r0, %d", len);
+                    } else {
+                        bprintf(" r0, r1");
+                    }
 
-                        bprintf("[r%u+%d], %d", reg_num, relative_offs, copy_len);
+                    break;
+                }
+                case JDNSQMATCH_EXT_OPCODE: {
+                    if (reg_num == 0) {
+                        print_opcode("jdnsqne");
+                    } else {
+                        print_opcode("jdnsqeq");
+                    }
+                    bprintf("r0, ");
+                    uint32_t offs = 0;
+                    DECODE_IMM(offs, 1 << (len_field - 1));
+                    uint16_t qtype = 0;
+                    DECODE_IMM(qtype, 1);
+                    uint32_t end = *pc;
+                    while (end + 1 < program_len && !(program[end] == 0 && program[end + 1] == 0)) {
+                        end++;
+                    }
+                    end += 2;
+                    print_jump_target(end + offs, program_len);
+                    bprintf(", %d, ", qtype);
+                    while (*pc < end) {
+                        uint8_t byte = program[(*pc)++];
+                        bprintf("%02x", byte);
                     }
                     break;
                 }
