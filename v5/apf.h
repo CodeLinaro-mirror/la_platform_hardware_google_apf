@@ -168,7 +168,7 @@ typedef union {
 #define JGT_OPCODE 17   // Compare greater than and branch, e.g. "jgt R0,5,label"
 #define JLT_OPCODE 18   // Compare less than and branch, e.g. "jlt R0,5,label"
 #define JSET_OPCODE 19  // Compare any bits set and branch, e.g. "jset R0,5,label"
-#define JNEBS_OPCODE 20 // Compare not equal byte sequence, e.g. "jnebs R0,5,label,0x1122334455"
+#define JBSMATCH_OPCODE 20 // Compare byte sequence [R=0 not] equal, e.g. "jbsne R0,2,label,0x1122"
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
 #define LDDW_OPCODE 22  // Load 4 bytes from data address (register + simm): "lddw R0, [5+R1]"
 #define STDW_OPCODE 23  // Store 4 bytes to data address (register + simm): "stdw R0, [5+R1]"
