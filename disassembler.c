@@ -289,9 +289,9 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                     }
                     if (imm == EPKTDATACOPYIMM_EXT_OPCODE) {
                         uint32_t len = DECODE_IMM(1);
-                        bprintf(" r0, %d", len);
+                        bprintf(" src=r0, len=%d", len);
                     } else {
-                        bprintf(" r0, r1");
+                        bprintf(" src=r0, len=r1");
                     }
 
                     break;
@@ -356,7 +356,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
             }
             uint32_t src_offs = imm;
             uint32_t copy_len = DECODE_IMM(1);
-            bprintf("%d, %d", src_offs, copy_len);
+            bprintf("src=%d, len=%d", src_offs, copy_len);
             break;
         }
         // Unknown opcode
