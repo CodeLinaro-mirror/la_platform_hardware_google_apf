@@ -296,25 +296,37 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
 
                     break;
                 }
-                case JDNSQMATCH_EXT_OPCODE: {
-                    if (reg_num == 0) {
-                        print_opcode("jdnsqne");
+                case JDNSQMATCH_EXT_OPCODE:
+                case JDNSAMATCH_EXT_OPCODE: {
+                    uint32_t offs = DECODE_IMM(1 << (len_field - 1));
+                    uint16_t qtype;
+                    if (imm == JDNSQMATCH_EXT_OPCODE) {
+                        print_opcode(reg_num ? "jdnsqeq" : "jdnsqne");
+                        qtype = DECODE_IMM(1);
                     } else {
-                        print_opcode("jdnsqeq");
+                        print_opcode(reg_num ? "jdnsaeq" : "jdnsane");
                     }
                     bprintf("r0, ");
-                    uint32_t offs = DECODE_IMM(1 << (len_field - 1));
-                    uint16_t qtype = DECODE_IMM(1);
                     uint32_t end = *ptr2pc;
                     while (end + 1 < program_len && !(program[end] == 0 && program[end + 1] == 0)) {
                         end++;
                     }
                     end += 2;
                     print_jump_target(end + offs, program_len);
-                    bprintf(", %d, ", qtype);
+                    bprintf(", ");
+                    if (imm == JDNSQMATCH_EXT_OPCODE) {
+                        bprintf("%d, ", qtype);
+                    }
                     while (*ptr2pc < end) {
                         uint8_t byte = program[(*ptr2pc)++];
-                        bprintf("%02x", byte);
+                        // values < 0x40 could be lengths, but - and 0..9 are in practice usually
+                        // too long to be lengths so print them as characters. All other chars < 0x40
+                        // are not valid in dns character.
+                        if (byte == '-' || (byte >= '0' && byte <= '9') || byte >= 0x40) {
+                            bprintf("%c", byte);
+                        } else {
+                            bprintf("(%d)", byte);
+                        }
                     }
                     break;
                 }
@@ -350,9 +362,9 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
         }
         case PKTDATACOPY_OPCODE: {
             if (reg_num == 0) {
-                print_opcode("pcopy");
+                print_opcode("pktcopy");
             } else {
-                print_opcode("dcopy");
+                print_opcode("datacopy");
             }
             uint32_t src_offs = imm;
             uint32_t copy_len = DECODE_IMM(1);
