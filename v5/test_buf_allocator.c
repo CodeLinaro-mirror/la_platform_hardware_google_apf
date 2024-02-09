@@ -19,7 +19,7 @@
 #include "apf_interpreter.h"
 #include "test_buf_allocator.h"
 
-uint8_t apf_test_buffer[APF_TX_BUFFER_SIZE];
+uint8_t apf_test_buffer[sizeof(apf_test_buffer)];
 uint32_t apf_test_tx_packet_len;
 uint8_t apf_test_tx_dscp;
 
@@ -29,7 +29,7 @@ uint8_t apf_test_tx_dscp;
  * Clean up the apf_test_buffer and return the pointer to beginning of the buffer region.
  */
 uint8_t* apf_allocate_buffer(__attribute__ ((unused)) void* ctx, uint32_t size) {
-  if (size > APF_TX_BUFFER_SIZE) {
+  if (size > sizeof(apf_test_buffer)) {
     return NULL;
   }
   return apf_test_buffer;
