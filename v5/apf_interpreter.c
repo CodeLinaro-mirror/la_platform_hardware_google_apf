@@ -112,8 +112,11 @@ int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
 
 // Decode the imm length.
 #define DECODE_IMM(value, length)                                              \
-    for (uint32_t i = 0; i < (length) && pc < program_len; i++)                \
-        value = (value << 8) | program[pc++]
+    do {                                                                       \
+        uint32_t i;                                                            \
+        for (i = 0; i < (length) && pc < program_len; i++)                     \
+            value = (value << 8) | program[pc++];                              \
+    } while (0)
 
   do {
       APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, memory, ram_len);
@@ -154,7 +157,7 @@ int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
                   offs += registers[1];
               }
               ASSERT_IN_PACKET_BOUNDS(offs);
-              uint32_t load_size;
+              uint32_t load_size = 0;
               switch (opcode) {
                   case LDB_OPCODE:
                   case LDBX_OPCODE:

@@ -27,7 +27,7 @@
 static int print_opcode(const char* opcode, char* output_buffer,
                         int output_buffer_len, int offset) {
     int ret = snprintf(output_buffer + offset, output_buffer_len - offset,
-                      "%-6s", opcode);
+                      "%-12s", opcode);
     return ret;
 }
 
