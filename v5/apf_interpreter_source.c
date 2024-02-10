@@ -341,6 +341,21 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                     }
                     break;
                   }
+                  case EWRITE1_EXT_OPCODE:
+                  case EWRITE2_EXT_OPCODE:
+                  case EWRITE4_EXT_OPCODE: {
+                    ASSERT_RETURN(tx_buf != NULL);
+                    u32 offs = mem.named.tx_buf_offset;
+                    const u32 write_len = 1 << (imm - EWRITE1_EXT_OPCODE);
+                    ASSERT_IN_OUTPUT_BOUNDS(offs, write_len);
+                    u32 i;
+                    for (i = 0; i < write_len; ++i) {
+                        *(tx_buf + offs) = (u8) ((REG >> (write_len - 1 - i) * 8) & 0xff);
+                        offs++;
+                    }
+                    mem.named.tx_buf_offset = offs;
+                    break;
+                  }
                   default:  // Unknown extended opcode
                     return PASS_PACKET;  // Bail out
               }
