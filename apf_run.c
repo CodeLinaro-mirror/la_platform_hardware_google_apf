@@ -176,7 +176,7 @@ void packet_handler(int use_apf_v6_interpreter, uint8_t* program,
 
     int ret;
     if (use_apf_v6_interpreter) {
-        ret = apf_run(NULL, program, program_len, ram_len, packet, packet_len,
+        ret = apf_run(NULL, (uint32_t*)program, program_len, ram_len, packet, packet_len,
                             filter_age);
     } else {
         ret = accept_packet(program, program_len, ram_len, packet, packet_len,
@@ -231,7 +231,7 @@ void file_handler(int use_apf_v6_interpreter, uint8_t* program,
 
         int result;
         if (use_apf_v6_interpreter) {
-            result = apf_run(NULL, program, program_len, ram_len, apf_packet,
+            result = apf_run(NULL, (uint32_t*)program, program_len, ram_len, apf_packet,
                              apf_header.len, filter_age);
         } else {
             result = accept_packet(program, program_len, ram_len, apf_packet,

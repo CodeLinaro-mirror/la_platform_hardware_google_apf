@@ -17,7 +17,13 @@
 #include "apf_interpreter.h"
 
 /* TODO: Remove the dependency of the standard library and make the interpreter self-contained. */
-#include <string.h>/* For memcmp */
+#include <string.h>  /* For memcmp */
+
+#if __GNUC__ >= 7 || __clang__
+#define FALLTHROUGH __attribute__((fallthrough))
+#else
+#define FALLTHROUGH
+#endif
 
 typedef enum { false, true } bool;
 
@@ -270,11 +276,15 @@ typedef union {
  */
 #define ALLOCATE_EXT_OPCODE 36
 /* Transmit and deallocate the buffer (transmission can be delayed until the program
- * terminates). R=0 means discard the buffer, R=1 means transmit the buffer.
- * "e.g. trans"
- * "e.g. discard"
+ * terminates).  Length of buffer is the output buffer pointer (0 means discard).
+ * R=1 iff udp style L4 checksum
+ * u8 imm2 - ip header offset from start of buffer (255 for non-ip packets)
+ * u8 imm3 - offset from start of buffer to store L4 checksum (255 for no L4 checksum)
+ * u8 imm4 - offset from start of buffer to begin L4 checksum calculation (present iff imm3 != 255)
+ * u16 imm5 - partial checksum value to include in L4 checksum (present iff imm3 != 255)
+ * "e.g. transmit"
  */
-#define TRANSMITDISCARD_EXT_OPCODE 37
+#define TRANSMIT_EXT_OPCODE 37
 /* Write 1, 2 or 4 byte value from register to the output buffer and auto-increment the
  * output buffer pointer.
  * e.g. "ewrite1 r0"
@@ -294,6 +304,7 @@ typedef union {
 #define EPKTDATACOPYR1_EXT_OPCODE 42
 /* Jumps if the UDP payload content (starting at R0) does not contain the specified QNAME,
  * applying MDNS case insensitivity.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
  * R0: Offset to UDP payload content
  * imm1: Opcode
  * imm2: Label offset
@@ -302,9 +313,11 @@ typedef union {
  * e.g.: "jdnsqmatch R0,label,0x0c,\002aa\005local\0\0"
  */
 #define JDNSQMATCH_EXT_OPCODE 43
+#define JDNSQMATCHSAFE_EXT_OPCODE 45
 /* Jumps if the UDP payload content (starting at R0) does not contain one
  * of the specified NAMEs in answers/authority/additional records, applying
  * case insensitivity.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
  * R=0/1 meaning 'does not match'/'matches'
  * R0: Offset to UDP payload content
  * imm1: Opcode
@@ -313,6 +326,10 @@ typedef union {
  * e.g.: "jdnsamatch R0,label,0x0c,\002aa\005local\0\0"
  */
 #define JDNSAMATCH_EXT_OPCODE 44
+#define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+/* This extended opcode is used to implement PKTDATACOPY_OPCODE */
+#define PKTDATACOPYIMM_EXT_OPCODE 65536
 
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
@@ -375,15 +392,21 @@ match_result_type match_single_name(const u8* needle,
             u8 label_size = v;
             if (*ofs + label_size > udp_len) return error_packet;
             if (needle >= needle_bound) return error_program;
-            if (is_qname_match && label_size == *needle++) {
-                if (needle + label_size > needle_bound) return error_program;
-                while (label_size--) {
-                    u8 w = udp[(*ofs)++];
-                    is_qname_match &= (uppercase(w) == *needle++);
+            if (is_qname_match) {
+                u8 len = *needle++;
+                if (len == label_size) {
+                    if (needle + label_size > needle_bound) return error_program;
+                    while (label_size--) {
+                        u8 w = udp[(*ofs)++];
+                        is_qname_match &= (uppercase(w) == *needle++);
+                    }
+                } else {
+                    if (len != 0xFF) is_qname_match = false;
+                    *ofs += label_size;
                 }
             } else {
-                *ofs += label_size;
                 is_qname_match = false;
+                *ofs += label_size;
             }
         } else { /* reached the end of the name */
             if (first_unread_offset > *ofs) *ofs = first_unread_offset;
@@ -446,6 +469,7 @@ match_result_type match_names(const u8* needles,
         /* move needles pointer to the next needle. */
         do {
             u8 len = *needles++;
+            if (len == 0xFF) continue;
             if (len > 63) return error_program;
             needles += len;
             if (needles >= needle_bound) return error_program;
@@ -543,6 +567,55 @@ int calculate_checksum_and_return_dscp(u8* const pkt, const s32 len) {
       default: return 0;
     }
 }
+
+/**
+ * Calculate and store packet checksums and return dscp.
+ *
+ * @param pkt - pointer to the very start of the to-be-transmitted packet,
+ *              ie. the start of the ethernet header (if one is present)
+ *     WARNING: at minimum 266 bytes of buffer pointed to by 'pkt' pointer
+ *              *MUST* be writable.
+ * (IPv4 header checksum is a 2 byte value, 10 bytes after ip_ofs,
+ * which has a maximum value of 254.  Thus 254[ip_ofs] + 10 + 2[u16] = 266)
+ *
+ * @param len - length of the packet (this may be < 266).
+ * @param ip_ofs - offset from beginning of pkt to IPv4 or IPv6 header:
+ *                 IP version detected based on top nibble of this byte,
+ *                 for IPv4 we will calculate and store IP header checksum,
+ *                 but only for the first 20 bytes of the header,
+ *                 prior to calling this the IPv4 header checksum field
+ *                 must be initialized to the partial checksum of the IPv4
+ *                 options (0 if none)
+ *                 255 means there is no IP header (for example ARP)
+ *                 DSCP will be retrieved from this IP header (0 if none).
+ * @param partial_csum - additional value to include in L4 checksum
+ * @param csum_start - offset from beginning of pkt to begin L4 checksum
+ *                     calculation (until end of pkt specified by len)
+ * @param csum_ofs - offset from beginning of pkt to store L4 checksum
+ *                   255 means do not calculate/store L4 checksum
+ * @param udp - true iff we should generate a UDP style L4 checksum (0 -> 0xFFFF)
+ *
+ * @return 6-bit DSCP value [0..63], garbage on parse error.
+ */
+int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
+  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp) {
+    if (csum_ofs < 255) {
+        /* note that calc_csum() treats negative lengths as zero */
+        u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
+        if (udp) csum = fix_udp_csum(csum);
+        store_be16(pkt + csum_ofs, csum);
+    }
+    if (ip_ofs < 255) {
+        u8 ip = pkt[ip_ofs] >> 4;
+        if (ip == 4) {
+            store_be16(pkt + ip_ofs + 10, calc_csum(0, pkt + ip_ofs, IPV4_HLEN));
+            return pkt[ip_ofs + 1] >> 2;  /* DSCP */
+        } else if (ip == 6) {
+            return (read_be16(pkt + ip_ofs) >> 6) & 0x3F;  /* DSCP */
+        }
+    }
+    return 0;
+}
 /* End include of apf_checksum.h */
 
 /* User hook for interpreter debug tracing. */
@@ -570,14 +643,12 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240124;
+    return 20240126;
 }
 
-int apf_run(void* ctx, u8* const program, const u32 program_len,
-            const u32 ram_len, const u8* const packet,
-            const u32 packet_len, const u32 filter_age_16384ths) {
-/* Is offset within program bounds? */
-#define IN_PROGRAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < program_len)
+static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
+                      const u32 ram_len, const u8* const packet,
+                      const u32 packet_len, const u32 filter_age_16384ths) {
 /* Is offset within ram bounds? */
 #define IN_RAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < ram_len)
 /* Is offset within packet bounds? */
@@ -586,10 +657,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
 #define IN_DATA_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
                                  (p) + (size) <= ram_len && \
-                                 (p) >= program_len && \
                                  (p) + (size) >= (p))  /* catch wraparounds */
-/* Accept packet if not within program bounds */
-#define ASSERT_IN_PROGRAM_BOUNDS(p) ASSERT_RETURN(IN_PROGRAM_BOUNDS(p))
 /* Accept packet if not within ram bounds */
 #define ASSERT_IN_RAM_BOUNDS(p) ASSERT_RETURN(IN_RAM_BOUNDS(p))
 /* Accept packet if not within packet bounds */
@@ -597,10 +665,12 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
 /* Accept packet if not within data bounds */
 #define ASSERT_IN_DATA_BOUNDS(p, size) ASSERT_RETURN(IN_DATA_BOUNDS(p, size))
 
+  bool v6 = false;
+  /* Counters start at end of RAM and count *backwards* so this array takes negative integers. */
+  u32 *counter = (u32*)(program + ram_len);
+
   /* Program counter. */
   u32 pc = 0;
-/* Accept packet if not within program or not ahead of program counter */
-#define ASSERT_FORWARD_IN_PROGRAM(p) ASSERT_RETURN(IN_PROGRAM_BOUNDS(p) && (p) >= pc)
   /* Memory slot values. */
   memory_type mem = {};
   /* Fill in pre-filled memory slot values. */
@@ -635,24 +705,22 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
 /* Accept packet if not write within allocated output buffer */
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
 
-/* Decode the imm length. */
-#define DECODE_IMM(value, length)                                              \
-    do {                                                                       \
-        ASSERT_FORWARD_IN_PROGRAM(pc + length - 1);                            \
-        value = 0;                                                             \
-        u32 i;                                                            \
-        for (i = 0; i < (length) && pc < program_len; i++)                     \
-            value = (value << 8) | program[pc++];                              \
+/* Decode the imm length, does not do range checking. */
+/* But note that program is at least 20 bytes shorter than ram, so first few */
+/* immediates can always be safely decoded without exceeding ram buffer. */
+#define DECODE_IMM(value, length)                   \
+    do {                                            \
+        value = 0;                                  \
+        u32 i;                                      \
+        for (i = 0; i < (length); i++)              \
+            value = (value << 8) | program[pc++];   \
     } while (0)
 
   do {
       APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, mem.slot, ram_len);
-      if (pc == program_len) {
-          return PASS_PACKET;
-      } else if (pc == (program_len + 1)) {
-          return DROP_PACKET;
-      }
-      ASSERT_IN_PROGRAM_BOUNDS(pc);
+      if (pc == program_len + 1) return DROP_PACKET;
+      if (pc >= program_len) return PASS_PACKET;
+
       const u8 bytecode = program[pc++];
       const u32 opcode = EXTRACT_OPCODE(bytecode);
       const u32 reg_num = EXTRACT_REGISTER(bytecode);
@@ -664,14 +732,22 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
       s32 signed_imm = 0;
       if (len_field != 0) {
           const u32 imm_len = 1 << (len_field - 1);
-          ASSERT_FORWARD_IN_PROGRAM(pc + imm_len - 1);
-          DECODE_IMM(imm, imm_len);
+          DECODE_IMM(imm, imm_len); /* 1st immediate, at worst bytes 1-4 past opcode/program_len */
           /* Sign extend imm into signed_imm. */
           signed_imm = (s32) (imm << ((4 - imm_len) * 8));
           signed_imm >>= (4 - imm_len) * 8;
       }
 
+      u32 pktcopy_src_offset = 0;  /* used for various pktdatacopy opcodes */
       switch (opcode) {
+          case PASSDROP_OPCODE: {
+              if (len_field > 2) return PASS_PACKET;  /* max 64K counters (ie. imm < 64K) */
+              if (imm) {
+                  if (4 * imm > ram_len) return PASS_PACKET;
+                  counter[-imm]++;
+              }
+              return reg_num ? DROP_PACKET : PASS_PACKET;
+          }
           case LDB_OPCODE:
           case LDH_OPCODE:
           case LDW_OPCODE:
@@ -712,6 +788,12 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
               break;
           }
           case JMP_OPCODE:
+              if (reg_num && !v6) {
+                /* First invocation of APFv6 jmpdata instruction */
+                counter[-1] = 0x12345678; /* endianness marker */
+                counter[-2]++; /* total packets ++ */
+                v6 = true;
+              }
               /* This can jump backwards. Infinite looping prevented by instructions_remaining. */
               pc += imm;
               break;
@@ -727,8 +809,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                   cmp_imm = registers[1];
               } else if (len_field != 0) {
                   u32 cmp_imm_len = 1 << (len_field - 1);
-                  ASSERT_FORWARD_IN_PROGRAM(pc + cmp_imm_len - 1);
-                  DECODE_IMM(cmp_imm, cmp_imm_len);
+                  DECODE_IMM(cmp_imm, cmp_imm_len); /* 2nd imm, at worst 8 bytes past prog_len */
               }
               switch (opcode) {
                   case JEQ_OPCODE:  if (registers[0] == cmp_imm) pc += imm; break;
@@ -741,7 +822,9 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                       /* pc is offset of program bytes to compare. */
                       /* imm is jump target offset. */
                       /* REG is offset of packet bytes to compare. */
-                      ASSERT_FORWARD_IN_PROGRAM(pc + cmp_imm - 1);
+                      if (len_field > 2) return PASS_PACKET; /* guarantees cmp_imm <= 0xFFFF */
+                      /* pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap */
+                      if (!IN_RAM_BOUNDS(pc + cmp_imm - 1)) return PASS_PACKET;
                       ASSERT_IN_PACKET_BOUNDS(REG);
                       const u32 last_packet_offs = REG + cmp_imm - 1;
                       ASSERT_RETURN(last_packet_offs >= REG);
@@ -776,6 +859,10 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
           case LI_OPCODE:
               REG = (u32) signed_imm;
               break;
+          case PKTDATACOPY_OPCODE:
+              pktcopy_src_offset = imm;
+              imm = PKTDATACOPYIMM_EXT_OPCODE;
+              FALLTHROUGH;
           case EXT_OPCODE:
               if (
 /* If LDM_EXT_OPCODE is 0 and imm is compared with it, a compiler error will result, */
@@ -804,16 +891,16 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                     if (reg_num == 0) {
                         tx_buf_len = REG;
                     } else {
-                        DECODE_IMM(tx_buf_len, 2);
+                        DECODE_IMM(tx_buf_len, 2); /* 2nd imm, at worst 6 bytes past prog_len */
                     }
-                    /* checksumming functions requires minimum 74 byte buffer for correctness */
-                    if (tx_buf_len < 74) tx_buf_len = 74;
+                    /* checksumming functions requires minimum 266 byte buffer for correctness */
+                    if (tx_buf_len < 266) tx_buf_len = 266;
                     tx_buf = apf_allocate_buffer(ctx, tx_buf_len);
-                    ASSERT_RETURN(tx_buf != NULL);
+                    if (!tx_buf) { counter[-3]++; return PASS_PACKET; } /* allocate failure */
                     memset(tx_buf, 0, tx_buf_len);
                     mem.named.tx_buf_offset = 0;
                     break;
-                  case TRANSMITDISCARD_EXT_OPCODE:
+                  case TRANSMIT_EXT_OPCODE:
                     ASSERT_RETURN(tx_buf != NULL);
                     u32 pkt_len = mem.named.tx_buf_offset;
                     /* If pkt_len > allocate_buffer_len, it means sth. wrong */
@@ -827,36 +914,78 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                     /* tx_buf_len cannot be large because we'd run out of RAM, */
                     /* so the above unsigned comparison effectively guarantees casting pkt_len */
                     /* to a signed value does not result in it going negative. */
-                    int dscp = calculate_checksum_and_return_dscp(tx_buf, (s32)pkt_len);
+                    u8 ip_ofs, csum_ofs;
+                    u8 csum_start = 0;
+                    u16 partial_csum = 0;
+                    DECODE_IMM(ip_ofs, 1);            /* 2nd imm, at worst 5 bytes past prog_len */
+                    DECODE_IMM(csum_ofs, 1);          /* 3rd imm, at worst 6 bytes past prog_len */
+                    if (csum_ofs < 255) {
+                        DECODE_IMM(csum_start, 1);    /* 4th imm, at worst 7 bytes past prog_len */
+                        DECODE_IMM(partial_csum, 2);  /* 5th imm, at worst 9 bytes past prog_len */
+                    }
+                    int dscp = csum_and_return_dscp(tx_buf, (s32)pkt_len, ip_ofs,
+                                                    partial_csum, csum_start, csum_ofs,
+                                                    (bool)reg_num);
                     int ret = apf_transmit_buffer(ctx, tx_buf, pkt_len, dscp);
                     tx_buf = NULL;
                     tx_buf_len = 0;
-                    if (ret) {
-                      return PASS_PACKET;
-                    }
+                    if (ret) { counter[-4]++; return PASS_PACKET; } /* transmit failure */
                     break;
-                  case JDNSQMATCH_EXT_OPCODE: {
+                  case EPKTDATACOPYIMM_EXT_OPCODE:  /* 41 */
+                  case EPKTDATACOPYR1_EXT_OPCODE:   /* 42 */
+                    pktcopy_src_offset = registers[0];
+                    FALLTHROUGH;
+                  case PKTDATACOPYIMM_EXT_OPCODE: { /* 65536 */
+                    u32 copy_len = registers[1];
+                    if (imm != EPKTDATACOPYR1_EXT_OPCODE) {
+                        DECODE_IMM(copy_len, 1); /* 2nd imm, at worst 8 bytes past prog_len */
+                    }
+                    ASSERT_RETURN(tx_buf != NULL);
+                    u32 dst_offs = mem.named.tx_buf_offset;
+                    ASSERT_IN_OUTPUT_BOUNDS(dst_offs, copy_len);
+                    /* reg_num == 0 copy from packet, reg_num == 1 copy from data. */
+                    if (reg_num == 0) {
+                        ASSERT_IN_PACKET_BOUNDS(pktcopy_src_offset);
+                        const u32 last_packet_offs = pktcopy_src_offset + copy_len - 1;
+                        ASSERT_RETURN(last_packet_offs >= pktcopy_src_offset);
+                        ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+                        memmove(tx_buf + dst_offs, packet + pktcopy_src_offset, copy_len);
+                    } else {
+                        ASSERT_IN_RAM_BOUNDS(pktcopy_src_offset + copy_len - 1);
+                        memmove(tx_buf + dst_offs, program + pktcopy_src_offset, copy_len);
+                    }
+                    dst_offs += copy_len;
+                    mem.named.tx_buf_offset = dst_offs;
+                    break;
+                  }
+                  case JDNSQMATCH_EXT_OPCODE:       /* 43 */
+                  case JDNSAMATCH_EXT_OPCODE:       /* 44 */
+                  case JDNSQMATCHSAFE_EXT_OPCODE:   /* 45 */
+                  case JDNSAMATCHSAFE_EXT_OPCODE: { /* 46 */
                     const u32 imm_len = 1 << (len_field - 1);
                     u32 jump_offs;
-                    DECODE_IMM(jump_offs, imm_len);
-                    int qtype;
-                    DECODE_IMM(qtype, 1);
+                    DECODE_IMM(jump_offs, imm_len); /* 2nd imm, at worst 8 bytes past prog_len */
+                    int qtype = -1;
+                    if (imm & 1) { /* JDNSQMATCH & JDNSQMATCHSAFE are *odd* extended opcodes */
+                        DECODE_IMM(qtype, 1); /* 3rd imm, at worst 9 bytes past prog_len */
+                    }
                     u32 udp_payload_offset = registers[0];
-                    int match_rst = match_names(program + pc,
-                                                program + program_len,
-                                                packet + udp_payload_offset,
-                                                packet_len - udp_payload_offset,
-                                                qtype);
-                    if (match_rst == -1) return PASS_PACKET;
+                    match_result_type match_rst = match_names(program + pc,
+                                                              program + program_len,
+                                                              packet + udp_payload_offset,
+                                                              packet_len - udp_payload_offset,
+                                                              qtype);
+                    if (match_rst == error_program) return PASS_PACKET;
+                    if (match_rst == error_packet) {
+                        counter[-5]++; /* increment error dns packet counter */
+                        return (imm >= JDNSQMATCHSAFE_EXT_OPCODE) ? PASS_PACKET : DROP_PACKET;
+                    }
                     while (pc + 1 < program_len && !(program[pc] == 0 && program[pc + 1] == 0)) {
                         pc++;
                     }
                     pc += 2;
-                    if (reg_num == 0 && match_rst == 0) {
-                        pc += jump_offs;
-                    } else if (reg_num == 1 && match_rst == 1) {
-                        pc += jump_offs;
-                    }
+                    /* relies on reg_num in {0,1} and match_rst being {false=0, true=1} */
+                    if (!(reg_num ^ (u32)match_rst)) pc += jump_offs;
                     break;
                   }
                   case EWRITE1_EXT_OPCODE:
@@ -927,31 +1056,29 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
               mem.named.tx_buf_offset = offs;
               break;
           }
-          case PKTDATACOPY_OPCODE: {
-              ASSERT_RETURN(tx_buf != NULL);
-              u32 src_offs = imm;
-              u32 copy_len;
-              DECODE_IMM(copy_len, 1);
-              u32 dst_offs = mem.named.tx_buf_offset;
-              ASSERT_IN_OUTPUT_BOUNDS(dst_offs, copy_len);
-              /* reg_num == 0 copy from packet, reg_num == 1 copy from data. */
-              if (reg_num == 0) {
-                  ASSERT_IN_PACKET_BOUNDS(src_offs);
-                  const u32 last_packet_offs = src_offs + copy_len - 1;
-                  ASSERT_RETURN(last_packet_offs >= src_offs);
-                  ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                  memmove(tx_buf + dst_offs, packet + src_offs, copy_len);
-              } else {
-                  ASSERT_IN_RAM_BOUNDS(src_offs + copy_len - 1);
-                  memmove(tx_buf + dst_offs, program + src_offs, copy_len);
-              }
-              dst_offs += copy_len;
-              mem.named.tx_buf_offset = dst_offs;
-              break;
-          }
           default:  /* Unknown opcode */
               return PASS_PACKET;  /* Bail out */
       }
   } while (instructions_remaining--);
   return PASS_PACKET;
+}
+
+int apf_run(void* ctx, u32* const program, const u32 program_len,
+            const u32 ram_len, const u8* const packet,
+            const u32 packet_len, const u32 filter_age_16384ths) {
+  /* Due to direct 32-bit read/write access to counters at end of ram */
+  /* APFv6 interpreter requires program & ram_len to be 4 byte aligned. */
+  if (3 & (uintptr_t)program) return PASS_PACKET;
+  if (3 & ram_len) return PASS_PACKET;
+
+  /* We rely on ram_len + 65536 not overflowing, so require ram_len < 2GiB */
+  /* Similarly LDDW/STDW have special meaning for negative ram offsets. */
+  /* We also don't want garbage like program_len == 0xFFFFFFFF */
+  if ((program_len | ram_len) >> 31) return PASS_PACKET;
+
+  /* APFv6 requires at least 5 u32 counters at the end of ram, this makes counter[-5]++ valid */
+  /* This cannot wrap due to previous check. */
+  if (program_len + 20 > ram_len) return PASS_PACKET;
+
+  return do_apf_run(ctx, (u8*)program, program_len, ram_len, packet, packet_len, filter_age_16384ths);
 }

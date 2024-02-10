@@ -29,6 +29,15 @@ TEST(ApfDnsTest, MatchSingleNameWithNoNameCompression) {
     u32 ofs = 12;
     EXPECT_EQ(match_single_name(needle_match, needle_match + sizeof(needle_match), udp_payload, sizeof(udp_payload), &ofs), match);
     EXPECT_EQ(ofs, 29);
+    const uint8_t needle_match_star[] = {
+        0x04, '_', 'N', 'M', 'T',
+        0xff,
+        0x05, 'L', 'O', 'C', 'A', 'L',
+        0x00 // needle = _NMT.*.LOCAL
+    };
+    ofs = 12;
+    EXPECT_EQ(match_single_name(needle_match_star, needle_match_star + sizeof(needle_match_star), udp_payload, sizeof(udp_payload), &ofs), match);
+    EXPECT_EQ(ofs, 29);
     const uint8_t needle_nomatch[] = {
         0x04, '_', 'M', 'M', 'M',
         0x04, '_', 't', 'c', 'p',
@@ -37,6 +46,15 @@ TEST(ApfDnsTest, MatchSingleNameWithNoNameCompression) {
     };
     ofs = 12;
     EXPECT_EQ(match_single_name(needle_nomatch, needle_nomatch + sizeof(needle_nomatch), udp_payload, sizeof(udp_payload), &ofs), nomatch);
+    EXPECT_EQ(ofs, 29);
+    const uint8_t needle_nomatch_star[] = {
+        0xff,
+        0x04, '_', 'u', 'd', 'p',
+        0x05, 'l', 'o', 'c', 'a', 'l',
+        0x00 // needle = *._udp.local
+    };
+    ofs = 12;
+    EXPECT_EQ(match_single_name(needle_nomatch_star, needle_nomatch_star + sizeof(needle_nomatch_star), udp_payload, sizeof(udp_payload), &ofs), nomatch);
     EXPECT_EQ(ofs, 29);
 }
 
@@ -63,6 +81,14 @@ TEST(ApfDnsTest, MatchSingleNameWithoutNameCompression) {
     u32 ofs = 27;
     EXPECT_EQ(match_single_name(needle_match, needle_match + sizeof(needle_match), udp_payload, sizeof(udp_payload), &ofs), match);
     EXPECT_EQ(ofs, 29);
+    const uint8_t needle_match_star[] = {
+        0x01, 'B',
+        0xff,
+        0x00 // needle = B.*
+    };
+    ofs = 27;
+    EXPECT_EQ(match_single_name(needle_match_star, needle_match_star + sizeof(needle_match_star), udp_payload, sizeof(udp_payload), &ofs), match);
+    EXPECT_EQ(ofs, 29);
 }
 
 TEST(ApfDnsTest, MatchSingleNameWithInfiniteloop) {
@@ -87,6 +113,13 @@ TEST(ApfDnsTest, MatchSingleNameWithInfiniteloop) {
     };
     u32 ofs = 27;
     EXPECT_EQ(match_single_name(needle_match, needle_match + sizeof(needle_match), udp_payload, sizeof(udp_payload), &ofs), error_packet);
+    const uint8_t needle_match_star[] = {
+        0x01, 'B',
+        0xff,
+        0x00 // needle = B.*
+    };
+    ofs = 27;
+    EXPECT_EQ(match_single_name(needle_match_star, needle_match_star + sizeof(needle_match_star), udp_payload, sizeof(udp_payload), &ofs), error_packet);
 }
 
 TEST(ApfDnsTest, MatchNamesInQuestions) {
@@ -123,6 +156,16 @@ TEST(ApfDnsTest, MatchNamesInQuestions) {
         0x00
     };
     EXPECT_EQ(match_names(needles_match2, needles_match2 + sizeof(needles_match2), udp_payload, sizeof(udp_payload), 0x01), match);
+    // needles = { *, B.* }
+    const uint8_t needles_match2_star[] = {
+        0xff,
+        0x00,
+        0x01, 'B',
+        0xff,
+        0x00,
+        0x00
+    };
+    EXPECT_EQ(match_names(needles_match2_star, needles_match2_star + sizeof(needles_match2_star), udp_payload, sizeof(udp_payload), 0x01), match);
     // needles = { C.LOCAL }
     const uint8_t needles_nomatch[] = {
         0x01, 'C',
@@ -131,6 +174,14 @@ TEST(ApfDnsTest, MatchNamesInQuestions) {
         0x00
     };
     EXPECT_EQ(match_names(needles_nomatch, needles_nomatch + sizeof(needles_nomatch), udp_payload, sizeof(udp_payload), 0x01), nomatch);
+    // needles = { C.* }
+    const uint8_t needles_nomatch_star[] = {
+        0x01, 'C',
+        0xff,
+        0x00,
+        0x00
+    };
+    EXPECT_EQ(match_names(needles_nomatch_star, needles_nomatch_star + sizeof(needles_nomatch_star), udp_payload, sizeof(udp_payload), 0x01), nomatch);
 }
 
 TEST(ApfDnsTest, MatchNamesInAnswers) {
@@ -170,6 +221,15 @@ TEST(ApfDnsTest, MatchNamesInAnswers) {
         0x00
     };
     EXPECT_EQ(match_names(needles_match2, needles_match2 + sizeof(needles_match2), udp_payload, sizeof(udp_payload), -1), match);
+    // needles = { *, B.* }
+    const uint8_t needles_match2_star[] = {
+        0xff,
+        0x01, 'B',
+        0xff,
+        0x00,
+        0x00
+    };
+    EXPECT_EQ(match_names(needles_match2_star, needles_match2_star + sizeof(needles_match2_star), udp_payload, sizeof(udp_payload), -1), match);
     // needles = { C.LOCAL }
     const uint8_t needles_nomatch[] = {
         0x01, 'C',
@@ -178,6 +238,14 @@ TEST(ApfDnsTest, MatchNamesInAnswers) {
         0x00
     };
     EXPECT_EQ(match_names(needles_nomatch, needles_nomatch + sizeof(needles_nomatch), udp_payload, sizeof(udp_payload), -1), nomatch);
+    // needles = { C.* }
+    const uint8_t needles_nomatch_star[] = {
+        0x01, 'C',
+        0xff,
+        0x00,
+        0x00
+    };
+    EXPECT_EQ(match_names(needles_nomatch_star, needles_nomatch_star + sizeof(needles_nomatch_star), udp_payload, sizeof(udp_payload), -1), nomatch);
 }
 
 } // namespace apf
