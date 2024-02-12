@@ -29,7 +29,6 @@
 int main(void) {
   uint32_t program_len = 0;
   uint8_t program[10000];
-  char output_buffer[512];
 
   // Read in hex program bytes
   int byte;
@@ -38,8 +37,6 @@ int main(void) {
   }
 
   for (uint32_t pc = 0; pc < program_len;) {
-      pc = apf_disassemble(program, program_len, pc, output_buffer,
-                           sizeof(output_buffer) / sizeof(output_buffer[0]));
-      printf("%s\n", output_buffer);
+      printf("%s\n", apf_disassemble(program, program_len, &pc));
   }
 }
