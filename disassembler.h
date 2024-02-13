@@ -27,13 +27,13 @@ extern "C" {
  *
  * @param program the program bytecode.
  * @param program_len the length of the program bytecode.
- * @param pc pointer to the program counter which points to the current instruction.
+ * @param ptr2pc pointer to the program counter which points to the current instruction.
  *           After function call, the program counter will be updated to point to the
  *           next instruction.
  *
  * @return pointer to static buffer which contains human readable text.
  */
-const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* pc);
+const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* ptr2pc);
 
 #ifdef __cplusplus
 }

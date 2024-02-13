@@ -32,6 +32,8 @@ do_test() {
 }
 
 main() {
+  cd "${0%/*}"
+
   local -r me="${0##*/}"
   case "${me}" in
     apf_interpreter_assemble.sh)
