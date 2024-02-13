@@ -15,6 +15,7 @@ static u16 fix_udp_csum(u16 csum) {
     return csum ? csum : 0xFFFF;
 }
 
+#ifndef DO_NOT_NEED_OLD_CHECKSUM_CODE
 /**
  * Calculate the ipv4 header and tcp/udp layer 4 checksums.
  * (assumes IPv4 checksum field is set to partial sum of ipv4 options [likely 0])
@@ -86,6 +87,7 @@ int calculate_checksum_and_return_dscp(u8* const pkt, const s32 len) {
       default: return 0;
     }
 }
+#endif
 
 /**
  * Calculate and store packet checksums and return dscp.

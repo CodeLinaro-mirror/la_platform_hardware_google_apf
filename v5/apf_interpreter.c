@@ -1,5 +1,5 @@
 /*
- * Copyright 2023, The Android Open Source Project
+ * Copyright 2024, The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,8 +16,7 @@
 
 #include "apf_interpreter.h"
 
-/* TODO: Remove the dependency of the standard library and make the interpreter self-contained. */
-#include <string.h>  /* For memcmp */
+#include <string.h>  /* For memcmp, memmove, memset */
 
 #if __GNUC__ >= 7 || __clang__
 #define FALLTHROUGH __attribute__((fallthrough))
@@ -27,6 +26,7 @@
 
 typedef enum { false, true } bool;
 
+#define DO_NOT_NEED_OLD_CHECKSUM_CODE
 /* Begin include of apf_defs.h */
 typedef int8_t s8;
 typedef int16_t s16;
@@ -496,6 +496,7 @@ static u16 fix_udp_csum(u16 csum) {
     return csum ? csum : 0xFFFF;
 }
 
+#ifndef DO_NOT_NEED_OLD_CHECKSUM_CODE
 /**
  * Calculate the ipv4 header and tcp/udp layer 4 checksums.
  * (assumes IPv4 checksum field is set to partial sum of ipv4 options [likely 0])
@@ -567,6 +568,7 @@ int calculate_checksum_and_return_dscp(u8* const pkt, const s32 len) {
       default: return 0;
     }
 }
+#endif
 
 /**
  * Calculate and store packet checksums and return dscp.
@@ -629,8 +631,6 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
     } while (0)
 #endif
 
-/* Frame header size should be 14 */
-#define APF_FRAME_HEADER_SIZE 14
 /* Return code indicating "packet" should accepted. */
 #define PASS_PACKET 1
 /* Return code indicating "packet" should be dropped. */
@@ -643,20 +643,63 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240126;
+    return 20240209;
 }
 
-static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
-                      const u32 ram_len, const u8* const packet,
-                      const u32 packet_len, const u32 filter_age_16384ths) {
+typedef struct {
+    void *caller_ctx;  /* Passed in to interpreter, passed through to alloc/transmit. */
+    u8* tx_buf;        /* The output buffer pointer */
+    u32 tx_buf_len;    /* The length of the output buffer */
+    u8* program;       /* Pointer to program/data buffer */
+    u32 program_len;   /* Length of the program */
+    u32 ram_len;       /* Length of the entire apf program/data region */
+    const u8* packet;  /* Pointer to input packet buffer */
+    u32 packet_len;    /* Length of the input packet buffer */
+/*  u8 err_code;       // */
+    u8 v6;             /* Set to 1 by first jmpdata (APFv6+) instruction */
+    u32 pc;            /* Program counter. */
+    u32 R[2];          /* Register values. */
+    memory_type mem;   /* Memory slot values. */
+} apf_context;
+
+int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp) {
+    int ret = apf_transmit_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp);
+    ctx->tx_buf = NULL;
+    ctx->tx_buf_len = 0;
+    return ret;
+}
+
+static int do_discard_buffer(apf_context* ctx) {
+    return do_transmit_buffer(ctx, 0 /* pkt_len */, 0 /* dscp */);
+}
+
+/* Decode the imm length, does not do range checking. */
+/* But note that program is at least 20 bytes shorter than ram, so first few */
+/* immediates can always be safely decoded without exceeding ram buffer. */
+static u32 decode_imm(apf_context* ctx, u32 length) {
+    u32 i, v = 0;
+    for (i = 0; i < length; ++i) v = (v << 8) | ctx->program[ctx->pc++];
+    return v;
+}
+
+#define DECODE_U8() (ctx->program[ctx->pc++])
+
+static u16 decode_be16(apf_context* ctx) {
+    u16 v = ctx->program[ctx->pc++];
+    v <<= 8;
+    v |= ctx->program[ctx->pc++];
+    return v;
+}
+
+static int do_apf_run(apf_context* ctx) {
 /* Is offset within ram bounds? */
-#define IN_RAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < ram_len)
+#define IN_RAM_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < ctx->ram_len)
 /* Is offset within packet bounds? */
-#define IN_PACKET_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < packet_len)
+#define IN_PACKET_BOUNDS(p) (ENFORCE_UNSIGNED(p) && (p) < ctx->packet_len)
 /* Is access to offset |p| length |size| within data bounds? */
 #define IN_DATA_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
-                                 (p) + (size) <= ram_len && \
+                                 (p) + (size) <= ctx->ram_len && \
                                  (p) + (size) >= (p))  /* catch wraparounds */
 /* Accept packet if not within ram bounds */
 #define ASSERT_IN_RAM_BOUNDS(p) ASSERT_RETURN(IN_RAM_BOUNDS(p))
@@ -665,76 +708,48 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
 /* Accept packet if not within data bounds */
 #define ASSERT_IN_DATA_BOUNDS(p, size) ASSERT_RETURN(IN_DATA_BOUNDS(p, size))
 
-  bool v6 = false;
   /* Counters start at end of RAM and count *backwards* so this array takes negative integers. */
-  u32 *counter = (u32*)(program + ram_len);
+  u32 *counter = (u32*)(ctx->program + ctx->ram_len);
 
-  /* Program counter. */
-  u32 pc = 0;
-  /* Memory slot values. */
-  memory_type mem = {};
-  /* Fill in pre-filled memory slot values. */
-  mem.named.tx_buf_offset = 0;
-  mem.named.program_size = program_len;
-  mem.named.ram_len = ram_len;
-  mem.named.packet_size = packet_len;
-  mem.named.filter_age = filter_age_16384ths >> 14;
-  mem.named.filter_age_16384ths = filter_age_16384ths;
-  ASSERT_IN_PACKET_BOUNDS(APF_FRAME_HEADER_SIZE);
+  ASSERT_IN_PACKET_BOUNDS(ETH_HLEN);
   /* Only populate if IP version is IPv4. */
-  if ((packet[APF_FRAME_HEADER_SIZE] & 0xf0) == 0x40) {
-      mem.named.ipv4_header_size = (packet[APF_FRAME_HEADER_SIZE] & 15) * 4;
+  if ((ctx->packet[ETH_HLEN] & 0xf0) == 0x40) {
+      ctx->mem.named.ipv4_header_size = (ctx->packet[ETH_HLEN] & 15) * 4;
   }
-  /* Register values. */
-  u32 registers[2] = {};
   /* Count of instructions remaining to execute. This is done to ensure an */
   /* upper bound on execution time. It should never be hit and is only for */
   /* safety. Initialize to the number of bytes in the program which is an */
   /* upper bound on the number of instructions in the program. */
-  u32 instructions_remaining = program_len;
+  u32 instructions_remaining = ctx->program_len;
 
-  /* The output buffer pointer */
-  u8* tx_buf = NULL;
-  /* The length of the output buffer */
-  u32 tx_buf_len = 0;
 /* Is access to offset |p| length |size| within output buffer bounds? */
 #define IN_OUTPUT_BOUNDS(p, size) (ENFORCE_UNSIGNED(p) && \
                                  ENFORCE_UNSIGNED(size) && \
-                                 (p) + (size) <= tx_buf_len && \
+                                 (p) + (size) <= ctx->tx_buf_len && \
                                  (p) + (size) >= (p))
 /* Accept packet if not write within allocated output buffer */
 #define ASSERT_IN_OUTPUT_BOUNDS(p, size) ASSERT_RETURN(IN_OUTPUT_BOUNDS(p, size))
 
-/* Decode the imm length, does not do range checking. */
-/* But note that program is at least 20 bytes shorter than ram, so first few */
-/* immediates can always be safely decoded without exceeding ram buffer. */
-#define DECODE_IMM(value, length)                   \
-    do {                                            \
-        value = 0;                                  \
-        u32 i;                                      \
-        for (i = 0; i < (length); i++)              \
-            value = (value << 8) | program[pc++];   \
-    } while (0)
-
   do {
-      APF_TRACE_HOOK(pc, registers, program, program_len, packet, packet_len, mem.slot, ram_len);
-      if (pc == program_len + 1) return DROP_PACKET;
-      if (pc >= program_len) return PASS_PACKET;
+      APF_TRACE_HOOK(ctx->pc, ctx->R, ctx->program, ctx->program_len,
+                     ctx->packet, ctx->packet_len, ctx->mem.slot, ctx->ram_len);
+      if (ctx->pc == ctx->program_len + 1) return DROP_PACKET;
+      if (ctx->pc >= ctx->program_len) return PASS_PACKET;
 
-      const u8 bytecode = program[pc++];
+      const u8 bytecode = ctx->program[ctx->pc++];
       const u32 opcode = EXTRACT_OPCODE(bytecode);
       const u32 reg_num = EXTRACT_REGISTER(bytecode);
-#define REG (registers[reg_num])
-#define OTHER_REG (registers[reg_num ^ 1])
+#define REG (ctx->R[reg_num])
+#define OTHER_REG (ctx->R[reg_num ^ 1])
       /* All instructions have immediate fields, so load them now. */
       const u32 len_field = EXTRACT_IMM_LENGTH(bytecode);
       u32 imm = 0;
       s32 signed_imm = 0;
       if (len_field != 0) {
           const u32 imm_len = 1 << (len_field - 1);
-          DECODE_IMM(imm, imm_len); /* 1st immediate, at worst bytes 1-4 past opcode/program_len */
+          imm = decode_imm(ctx, imm_len); /* 1st imm, at worst bytes 1-4 past opcode/program_len */
           /* Sign extend imm into signed_imm. */
-          signed_imm = (s32) (imm << ((4 - imm_len) * 8));
+          signed_imm = (s32)(imm << ((4 - imm_len) * 8));
           signed_imm >>= (4 - imm_len) * 8;
       }
 
@@ -743,7 +758,7 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
           case PASSDROP_OPCODE: {
               if (len_field > 2) return PASS_PACKET;  /* max 64K counters (ie. imm < 64K) */
               if (imm) {
-                  if (4 * imm > ram_len) return PASS_PACKET;
+                  if (4 * imm > ctx->ram_len) return PASS_PACKET;
                   counter[-imm]++;
               }
               return reg_num ? DROP_PACKET : PASS_PACKET;
@@ -755,10 +770,8 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
           case LDHX_OPCODE:
           case LDWX_OPCODE: {
               u32 offs = imm;
-              if (opcode >= LDBX_OPCODE) {
-                  /* Note: this can overflow and actually decrease offs. */
-                  offs += registers[1];
-              }
+              /* Note: this can overflow and actually decrease offs. */
+              if (opcode >= LDBX_OPCODE) offs += ctx->R[1];
               ASSERT_IN_PACKET_BOUNDS(offs);
               u32 load_size = 0;
               switch (opcode) {
@@ -782,20 +795,19 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
               ASSERT_RETURN(end_offs >= offs);
               ASSERT_IN_PACKET_BOUNDS(end_offs);
               u32 val = 0;
-              while (load_size--)
-                  val = (val << 8) | packet[offs++];
+              while (load_size--) val = (val << 8) | ctx->packet[offs++];
               REG = val;
               break;
           }
           case JMP_OPCODE:
-              if (reg_num && !v6) {
+              if (reg_num && !ctx->v6) {
                 /* First invocation of APFv6 jmpdata instruction */
-                counter[-1] = 0x12345678; /* endianness marker */
-                counter[-2]++; /* total packets ++ */
-                v6 = true;
+                counter[-1] = 0x12345678;  /* endianness marker */
+                counter[-2]++;  /* total packets ++ */
+                ctx->v6 = (u8)true;
               }
               /* This can jump backwards. Infinite looping prevented by instructions_remaining. */
-              pc += imm;
+              ctx->pc += imm;
               break;
           case JEQ_OPCODE:
           case JNE_OPCODE:
@@ -806,17 +818,17 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
               /* Load second immediate field. */
               u32 cmp_imm = 0;
               if (reg_num == 1) {
-                  cmp_imm = registers[1];
+                  cmp_imm = ctx->R[1];
               } else if (len_field != 0) {
                   u32 cmp_imm_len = 1 << (len_field - 1);
-                  DECODE_IMM(cmp_imm, cmp_imm_len); /* 2nd imm, at worst 8 bytes past prog_len */
+                  cmp_imm = decode_imm(ctx, cmp_imm_len); /* 2nd imm, at worst 8 bytes past prog_len */
               }
               switch (opcode) {
-                  case JEQ_OPCODE:  if (registers[0] == cmp_imm) pc += imm; break;
-                  case JNE_OPCODE:  if (registers[0] != cmp_imm) pc += imm; break;
-                  case JGT_OPCODE:  if (registers[0] >  cmp_imm) pc += imm; break;
-                  case JLT_OPCODE:  if (registers[0] <  cmp_imm) pc += imm; break;
-                  case JSET_OPCODE: if (registers[0] &  cmp_imm) pc += imm; break;
+                  case JEQ_OPCODE:  if (ctx->R[0] == cmp_imm) ctx->pc += imm; break;
+                  case JNE_OPCODE:  if (ctx->R[0] != cmp_imm) ctx->pc += imm; break;
+                  case JGT_OPCODE:  if (ctx->R[0] >  cmp_imm) ctx->pc += imm; break;
+                  case JLT_OPCODE:  if (ctx->R[0] <  cmp_imm) ctx->pc += imm; break;
+                  case JSET_OPCODE: if (ctx->R[0] &  cmp_imm) ctx->pc += imm; break;
                   case JBSMATCH_OPCODE: {
                       /* cmp_imm is size in bytes of data to compare. */
                       /* pc is offset of program bytes to compare. */
@@ -824,58 +836,51 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
                       /* REG is offset of packet bytes to compare. */
                       if (len_field > 2) return PASS_PACKET; /* guarantees cmp_imm <= 0xFFFF */
                       /* pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap */
-                      if (!IN_RAM_BOUNDS(pc + cmp_imm - 1)) return PASS_PACKET;
+                      if (!IN_RAM_BOUNDS(ctx->pc + cmp_imm - 1)) return PASS_PACKET;
                       ASSERT_IN_PACKET_BOUNDS(REG);
                       const u32 last_packet_offs = REG + cmp_imm - 1;
                       ASSERT_RETURN(last_packet_offs >= REG);
                       ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                      if (memcmp(program + pc, packet + REG, cmp_imm))
-                          pc += imm;
+                      if (memcmp(ctx->program + ctx->pc, ctx->packet + REG, cmp_imm))
+                          ctx->pc += imm;
                       /* skip past comparison bytes */
-                      pc += cmp_imm;
+                      ctx->pc += cmp_imm;
                       break;
                   }
               }
               break;
           }
-          case ADD_OPCODE: registers[0] += reg_num ? registers[1] : imm; break;
-          case MUL_OPCODE: registers[0] *= reg_num ? registers[1] : imm; break;
-          case AND_OPCODE: registers[0] &= reg_num ? registers[1] : imm; break;
-          case OR_OPCODE:  registers[0] |= reg_num ? registers[1] : imm; break;
+          case ADD_OPCODE: ctx->R[0] += reg_num ? ctx->R[1] : imm; break;
+          case MUL_OPCODE: ctx->R[0] *= reg_num ? ctx->R[1] : imm; break;
+          case AND_OPCODE: ctx->R[0] &= reg_num ? ctx->R[1] : imm; break;
+          case OR_OPCODE:  ctx->R[0] |= reg_num ? ctx->R[1] : imm; break;
           case DIV_OPCODE: {
-              const u32 div_operand = reg_num ? registers[1] : imm;
+              const u32 div_operand = reg_num ? ctx->R[1] : imm;
               ASSERT_RETURN(div_operand);
-              registers[0] /= div_operand;
+              ctx->R[0] /= div_operand;
               break;
           }
           case SH_OPCODE: {
-              const s32 shift_val = reg_num ? (s32)registers[1] : signed_imm;
+              const s32 shift_val = reg_num ? (s32)ctx->R[1] : signed_imm;
               if (shift_val > 0)
-                  registers[0] <<= shift_val;
+                  ctx->R[0] <<= shift_val;
               else
-                  registers[0] >>= -shift_val;
+                  ctx->R[0] >>= -shift_val;
               break;
           }
           case LI_OPCODE:
-              REG = (u32) signed_imm;
+              REG = (u32)signed_imm;
               break;
           case PKTDATACOPY_OPCODE:
               pktcopy_src_offset = imm;
               imm = PKTDATACOPYIMM_EXT_OPCODE;
               FALLTHROUGH;
           case EXT_OPCODE:
-              if (
-/* If LDM_EXT_OPCODE is 0 and imm is compared with it, a compiler error will result, */
-/* instead just enforce that imm is unsigned (so it's always greater or equal to 0). */
-#if LDM_EXT_OPCODE == 0
-                  ENFORCE_UNSIGNED(imm) &&
-#else
-                  imm >= LDM_EXT_OPCODE &&
-#endif
+              if (/* imm >= LDM_EXT_OPCODE &&  -- but note imm is u32 and LDM_EXT_OPCODE is 0 */
                   imm < (LDM_EXT_OPCODE + MEMORY_ITEMS)) {
-                REG = mem.slot[imm - LDM_EXT_OPCODE];
+                REG = ctx->mem.slot[imm - LDM_EXT_OPCODE];
               } else if (imm >= STM_EXT_OPCODE && imm < (STM_EXT_OPCODE + MEMORY_ITEMS)) {
-                mem.slot[imm - STM_EXT_OPCODE] = REG;
+                ctx->mem.slot[imm - STM_EXT_OPCODE] = REG;
               } else switch (imm) {
                   case NOT_EXT_OPCODE: REG = ~REG;      break;
                   case NEG_EXT_OPCODE: REG = -REG;      break;
@@ -887,75 +892,73 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
                     break;
                   }
                   case ALLOCATE_EXT_OPCODE:
-                    ASSERT_RETURN(tx_buf == NULL);
+                    ASSERT_RETURN(ctx->tx_buf == NULL);
                     if (reg_num == 0) {
-                        tx_buf_len = REG;
+                        ctx->tx_buf_len = REG;
                     } else {
-                        DECODE_IMM(tx_buf_len, 2); /* 2nd imm, at worst 6 bytes past prog_len */
+                        ctx->tx_buf_len = decode_be16(ctx); /* 2nd imm, at worst 6 B past prog_len */
                     }
                     /* checksumming functions requires minimum 266 byte buffer for correctness */
-                    if (tx_buf_len < 266) tx_buf_len = 266;
-                    tx_buf = apf_allocate_buffer(ctx, tx_buf_len);
-                    if (!tx_buf) { counter[-3]++; return PASS_PACKET; } /* allocate failure */
-                    memset(tx_buf, 0, tx_buf_len);
-                    mem.named.tx_buf_offset = 0;
+                    if (ctx->tx_buf_len < 266) ctx->tx_buf_len = 266;
+                    ctx->tx_buf = apf_allocate_buffer(ctx->caller_ctx, ctx->tx_buf_len);
+                    if (!ctx->tx_buf) {  /* allocate failure */
+                        ctx->tx_buf_len = 0;
+                        counter[-3]++;
+                        return PASS_PACKET;
+                    }
+                    memset(ctx->tx_buf, 0, ctx->tx_buf_len);
+                    ctx->mem.named.tx_buf_offset = 0;
                     break;
                   case TRANSMIT_EXT_OPCODE:
-                    ASSERT_RETURN(tx_buf != NULL);
-                    u32 pkt_len = mem.named.tx_buf_offset;
+                    ASSERT_RETURN(ctx->tx_buf);
+                    u32 pkt_len = ctx->mem.named.tx_buf_offset;
                     /* If pkt_len > allocate_buffer_len, it means sth. wrong */
                     /* happened and the tx_buf should be deallocated. */
-                    if (pkt_len > tx_buf_len) {
-                        apf_transmit_buffer(ctx, tx_buf, 0 /* len */, 0 /* dscp */);
-                        tx_buf = NULL;
-                        tx_buf_len = 0;
+                    if (pkt_len > ctx->tx_buf_len) {
+                        do_discard_buffer(ctx);
                         return PASS_PACKET;
                     }
                     /* tx_buf_len cannot be large because we'd run out of RAM, */
                     /* so the above unsigned comparison effectively guarantees casting pkt_len */
                     /* to a signed value does not result in it going negative. */
-                    u8 ip_ofs, csum_ofs;
+                    u8 ip_ofs = DECODE_U8();              /* 2nd imm, at worst 5 B past prog_len */
+                    u8 csum_ofs = DECODE_U8();            /* 3rd imm, at worst 6 B past prog_len */
                     u8 csum_start = 0;
                     u16 partial_csum = 0;
-                    DECODE_IMM(ip_ofs, 1);            /* 2nd imm, at worst 5 bytes past prog_len */
-                    DECODE_IMM(csum_ofs, 1);          /* 3rd imm, at worst 6 bytes past prog_len */
                     if (csum_ofs < 255) {
-                        DECODE_IMM(csum_start, 1);    /* 4th imm, at worst 7 bytes past prog_len */
-                        DECODE_IMM(partial_csum, 2);  /* 5th imm, at worst 9 bytes past prog_len */
+                        csum_start = DECODE_U8();         /* 4th imm, at worst 7 B past prog_len */
+                        partial_csum = decode_be16(ctx);  /* 5th imm, at worst 9 B past prog_len */
                     }
-                    int dscp = csum_and_return_dscp(tx_buf, (s32)pkt_len, ip_ofs,
+                    int dscp = csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
                                                     partial_csum, csum_start, csum_ofs,
                                                     (bool)reg_num);
-                    int ret = apf_transmit_buffer(ctx, tx_buf, pkt_len, dscp);
-                    tx_buf = NULL;
-                    tx_buf_len = 0;
+                    int ret = do_transmit_buffer(ctx, pkt_len, dscp);
                     if (ret) { counter[-4]++; return PASS_PACKET; } /* transmit failure */
                     break;
                   case EPKTDATACOPYIMM_EXT_OPCODE:  /* 41 */
                   case EPKTDATACOPYR1_EXT_OPCODE:   /* 42 */
-                    pktcopy_src_offset = registers[0];
+                    pktcopy_src_offset = ctx->R[0];
                     FALLTHROUGH;
                   case PKTDATACOPYIMM_EXT_OPCODE: { /* 65536 */
-                    u32 copy_len = registers[1];
+                    u32 copy_len = ctx->R[1];
                     if (imm != EPKTDATACOPYR1_EXT_OPCODE) {
-                        DECODE_IMM(copy_len, 1); /* 2nd imm, at worst 8 bytes past prog_len */
+                        copy_len = DECODE_U8();  /* 2nd imm, at worst 8 bytes past prog_len */
                     }
-                    ASSERT_RETURN(tx_buf != NULL);
-                    u32 dst_offs = mem.named.tx_buf_offset;
+                    ASSERT_RETURN(ctx->tx_buf);
+                    u32 dst_offs = ctx->mem.named.tx_buf_offset;
                     ASSERT_IN_OUTPUT_BOUNDS(dst_offs, copy_len);
-                    /* reg_num == 0 copy from packet, reg_num == 1 copy from data. */
-                    if (reg_num == 0) {
+                    if (reg_num == 0) {  /* copy from packet */
                         ASSERT_IN_PACKET_BOUNDS(pktcopy_src_offset);
                         const u32 last_packet_offs = pktcopy_src_offset + copy_len - 1;
                         ASSERT_RETURN(last_packet_offs >= pktcopy_src_offset);
                         ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                        memmove(tx_buf + dst_offs, packet + pktcopy_src_offset, copy_len);
-                    } else {
+                        memmove(ctx->tx_buf + dst_offs, ctx->packet + pktcopy_src_offset, copy_len);
+                    } else {  /* copy from data */
                         ASSERT_IN_RAM_BOUNDS(pktcopy_src_offset + copy_len - 1);
-                        memmove(tx_buf + dst_offs, program + pktcopy_src_offset, copy_len);
+                        memmove(ctx->tx_buf + dst_offs, ctx->program + pktcopy_src_offset, copy_len);
                     }
                     dst_offs += copy_len;
-                    mem.named.tx_buf_offset = dst_offs;
+                    ctx->mem.named.tx_buf_offset = dst_offs;
                     break;
                   }
                   case JDNSQMATCH_EXT_OPCODE:       /* 43 */
@@ -963,44 +966,42 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
                   case JDNSQMATCHSAFE_EXT_OPCODE:   /* 45 */
                   case JDNSAMATCHSAFE_EXT_OPCODE: { /* 46 */
                     const u32 imm_len = 1 << (len_field - 1);
-                    u32 jump_offs;
-                    DECODE_IMM(jump_offs, imm_len); /* 2nd imm, at worst 8 bytes past prog_len */
+                    u32 jump_offs = decode_imm(ctx, imm_len); /* 2nd imm, at worst 8 B past prog_len */
                     int qtype = -1;
                     if (imm & 1) { /* JDNSQMATCH & JDNSQMATCHSAFE are *odd* extended opcodes */
-                        DECODE_IMM(qtype, 1); /* 3rd imm, at worst 9 bytes past prog_len */
+                        qtype = DECODE_U8();  /* 3rd imm, at worst 9 bytes past prog_len */
                     }
-                    u32 udp_payload_offset = registers[0];
-                    match_result_type match_rst = match_names(program + pc,
-                                                              program + program_len,
-                                                              packet + udp_payload_offset,
-                                                              packet_len - udp_payload_offset,
+                    u32 udp_payload_offset = ctx->R[0];
+                    match_result_type match_rst = match_names(ctx->program + ctx->pc,
+                                                              ctx->program + ctx->program_len,
+                                                              ctx->packet + udp_payload_offset,
+                                                              ctx->packet_len - udp_payload_offset,
                                                               qtype);
                     if (match_rst == error_program) return PASS_PACKET;
                     if (match_rst == error_packet) {
                         counter[-5]++; /* increment error dns packet counter */
                         return (imm >= JDNSQMATCHSAFE_EXT_OPCODE) ? PASS_PACKET : DROP_PACKET;
                     }
-                    while (pc + 1 < program_len && !(program[pc] == 0 && program[pc + 1] == 0)) {
-                        pc++;
+                    while (ctx->pc + 1 < ctx->program_len &&
+                           (ctx->program[ctx->pc] || ctx->program[ctx->pc + 1])) {
+                        ctx->pc++;
                     }
-                    pc += 2;
+                    ctx->pc += 2;  /* skip the final double 0 needle end */
                     /* relies on reg_num in {0,1} and match_rst being {false=0, true=1} */
-                    if (!(reg_num ^ (u32)match_rst)) pc += jump_offs;
+                    if (!(reg_num ^ (u32)match_rst)) ctx->pc += jump_offs;
                     break;
                   }
                   case EWRITE1_EXT_OPCODE:
                   case EWRITE2_EXT_OPCODE:
                   case EWRITE4_EXT_OPCODE: {
-                    ASSERT_RETURN(tx_buf != NULL);
-                    u32 offs = mem.named.tx_buf_offset;
+                    ASSERT_RETURN(ctx->tx_buf);
                     const u32 write_len = 1 << (imm - EWRITE1_EXT_OPCODE);
-                    ASSERT_IN_OUTPUT_BOUNDS(offs, write_len);
+                    ASSERT_IN_OUTPUT_BOUNDS(ctx->mem.named.tx_buf_offset, write_len);
                     u32 i;
                     for (i = 0; i < write_len; ++i) {
-                        *(tx_buf + offs) = (u8) ((REG >> (write_len - 1 - i) * 8) & 0xff);
-                        offs++;
+                        ctx->tx_buf[ctx->mem.named.tx_buf_offset++] =
+                            (u8)(REG >> (write_len - 1 - i) * 8);
                     }
-                    mem.named.tx_buf_offset = offs;
                     break;
                   }
                   default:  /* Unknown extended opcode */
@@ -1014,12 +1015,9 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
               /* Negative offsets wrap around the end of the address space. */
               /* This allows us to efficiently access the end of the */
               /* address space with one-byte immediates without using %=. */
-              if (offs & 0x80000000) {
-                  offs = ram_len + offs;  /* unsigned overflow intended */
-              }
+              if (offs & 0x80000000) offs += ctx->ram_len;  /* unsigned overflow intended */
               ASSERT_IN_DATA_BOUNDS(offs, size);
-              while (size--)
-                  val = (val << 8) | program[offs++];
+              while (size--) val = (val << 8) | ctx->program[offs++];
               REG = val;
               break;
           }
@@ -1030,30 +1028,24 @@ static int do_apf_run(void* ctx, u8* const program, const u32 program_len,
               /* Negative offsets wrap around the end of the address space. */
               /* This allows us to efficiently access the end of the */
               /* address space with one-byte immediates without using %=. */
-              if (offs & 0x80000000) {
-                  offs = ram_len + offs;  /* unsigned overflow intended */
-              }
+              if (offs & 0x80000000) offs += ctx->ram_len;  /* unsigned overflow intended */
               ASSERT_IN_DATA_BOUNDS(offs, size);
               while (size--) {
-                  program[offs++] = (val >> 24);
+                  ctx->program[offs++] = (val >> 24);
                   val <<= 8;
               }
               break;
           }
           case WRITE_OPCODE: {
-              ASSERT_RETURN(tx_buf != NULL);
-              ASSERT_RETURN(len_field > 0);
-              u32 offs = mem.named.tx_buf_offset;
+              ASSERT_RETURN(ctx->tx_buf);
+              ASSERT_RETURN(len_field);
               const u32 write_len = 1 << (len_field - 1);
-              ASSERT_RETURN(write_len > 0);
-              ASSERT_IN_OUTPUT_BOUNDS(offs, write_len);
+              ASSERT_IN_OUTPUT_BOUNDS(ctx->mem.named.tx_buf_offset, write_len);
               u32 i;
               for (i = 0; i < write_len; ++i) {
-                  *(tx_buf + offs) =
-                      (u8) ((imm >> (write_len - 1 - i) * 8) & 0xff);
-                  offs++;
+                  ctx->tx_buf[ctx->mem.named.tx_buf_offset++] =
+                      (u8)(imm >> (write_len - 1 - i) * 8);
               }
-              mem.named.tx_buf_offset = offs;
               break;
           }
           default:  /* Unknown opcode */
@@ -1080,5 +1072,21 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
   /* This cannot wrap due to previous check. */
   if (program_len + 20 > ram_len) return PASS_PACKET;
 
-  return do_apf_run(ctx, (u8*)program, program_len, ram_len, packet, packet_len, filter_age_16384ths);
+  apf_context apf_ctx = {};
+  apf_ctx.caller_ctx = ctx;
+  apf_ctx.program = (u8*)program;
+  apf_ctx.program_len = program_len;
+  apf_ctx.ram_len = ram_len;
+  apf_ctx.packet = packet;
+  apf_ctx.packet_len = packet_len;
+  /* Fill in pre-filled memory slot values. */
+  apf_ctx.mem.named.program_size = program_len;
+  apf_ctx.mem.named.ram_len = ram_len;
+  apf_ctx.mem.named.packet_size = packet_len;
+  apf_ctx.mem.named.filter_age = filter_age_16384ths >> 14;
+  apf_ctx.mem.named.filter_age_16384ths = filter_age_16384ths;
+
+  int ret = do_apf_run(&apf_ctx);
+  if (apf_ctx.tx_buf) do_discard_buffer(&apf_ctx);
+  return ret;
 }
