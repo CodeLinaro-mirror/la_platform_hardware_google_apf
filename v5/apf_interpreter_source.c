@@ -202,7 +202,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
           case JGT_OPCODE:
           case JLT_OPCODE:
           case JSET_OPCODE:
-          case JNEBS_OPCODE: {
+          case JBSMATCH_OPCODE: {
               // Load second immediate field.
               u32 cmp_imm = 0;
               if (reg_num == 1) {
@@ -218,7 +218,7 @@ int apf_run(void* ctx, u8* const program, const u32 program_len,
                   case JGT_OPCODE:  if (registers[0] >  cmp_imm) pc += imm; break;
                   case JLT_OPCODE:  if (registers[0] <  cmp_imm) pc += imm; break;
                   case JSET_OPCODE: if (registers[0] &  cmp_imm) pc += imm; break;
-                  case JNEBS_OPCODE: {
+                  case JBSMATCH_OPCODE: {
                       // cmp_imm is size in bytes of data to compare.
                       // pc is offset of program bytes to compare.
                       // imm is jump target offset.

@@ -29,6 +29,7 @@ sed -r \
 's@: ldhx +r([01]), \[r1\+([0-9]+)\]@: gen.addLoad16Indexed(R\1, \2);@;'\
 's@: ldwx +r([01]), \[r1\+([0-9]+)\]@: gen.addLoad32Indexed(R\1, \2);@;'\
 's@: ldm +r([01]), m\[([0-9]+)\]@: gen.addLoadFromMemory(R\1, \2);@;'\
+'/addJumpIfR0(Greater|Less)Than/s@(0x[8-f][0-9a-f]{7})@\1L@;'\
 < apf2java.txt > tmp
 declare -ar LABELS=($(sed -rn 's@.*LABEL_([0-9]+).*@\1@p' < tmp | sort -u))
 for L in "${LABELS[@]}"; do
