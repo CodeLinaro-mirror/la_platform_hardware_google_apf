@@ -26,7 +26,6 @@
 
 typedef enum { false, true } bool;
 
-#define DO_NOT_NEED_OLD_CHECKSUM_CODE
 #include "apf_defs.h"
 #include "apf.h"
 #include "apf_utils.h"

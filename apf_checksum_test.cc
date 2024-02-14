@@ -50,21 +50,11 @@ TEST(ApfChecksumTest, CalcIPv4UDPChecksum) {
         0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x62, 0x05, 0x6c, 0x6f, 0x63, 0x61, 0x6c, 0x00, 0x00,
         0x01, 0x80, 0x01, 0x00, 0x00, 0x00, 0x78, 0x00, 0x04, 0xc0, 0xa8, 0x01, 0x09,
     }};
-    // Set the UDP checksum to UDP payload size
-    ether_ipv4_udp_pkt.pkt.udphdr.check = htons(sizeof(ether_ipv4_udp_pkt) - IPV4_HLEN - ETH_HLEN);
-    uint8_t dscp = calculate_checksum_and_return_dscp((uint8_t *)&ether_ipv4_udp_pkt, sizeof(ether_ipv4_udp_pkt));
-    EXPECT_EQ(dscp, 1);
-    // Verify IPv4 header checksum
-    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv4_udp_pkt.pkt.iphdr.check), 0x9535);
-
-    // verify UDP checksum
-    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv4_udp_pkt.pkt.udphdr.check), 0xa73d);
-
     // Reset IPv4 header checksum to 0
     ether_ipv4_udp_pkt.pkt.iphdr.check = 0;
     // Set the UDP checksum to UDP payload size
     ether_ipv4_udp_pkt.pkt.udphdr.check = htons(sizeof(ether_ipv4_udp_pkt) - IPV4_HLEN - ETH_HLEN);
-    dscp = csum_and_return_dscp((uint8_t *)&ether_ipv4_udp_pkt, sizeof(ether_ipv4_udp_pkt),
+    uint8_t dscp = csum_and_return_dscp((uint8_t *)&ether_ipv4_udp_pkt, sizeof(ether_ipv4_udp_pkt),
                                 ETH_HLEN /* ip_ofs */, IPPROTO_UDP /* partial_csum */,
                                 ETH_HLEN + offsetof(iphdr, saddr) /* csum_start */,
                                 ETH_HLEN + IPV4_HLEN + offsetof(udphdr, check) /* csum_ofs */,
@@ -105,14 +95,7 @@ TEST(ApfChecksumTest, CalcIPv6UDPChecksum) {
     }};
     // Set the UDP checksum to UDP payload size
     ether_ipv6_udp_pkt.pkt.udphdr.check = htons(sizeof(ether_ipv6_udp_pkt) - IPV6_HLEN - ETH_HLEN);
-    uint8_t dscp = calculate_checksum_and_return_dscp((uint8_t *)&ether_ipv6_udp_pkt, sizeof(ether_ipv6_udp_pkt));
-    EXPECT_EQ(dscp, 6);
-    // verify UDP checksum
-    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv6_udp_pkt.pkt.udphdr.check), 0x1cbd);
-
-    // Set the UDP checksum to UDP payload size
-    ether_ipv6_udp_pkt.pkt.udphdr.check = htons(sizeof(ether_ipv6_udp_pkt) - IPV6_HLEN - ETH_HLEN);
-    dscp = csum_and_return_dscp((uint8_t *)&ether_ipv6_udp_pkt, sizeof(ether_ipv6_udp_pkt),
+    uint8_t dscp = csum_and_return_dscp((uint8_t *)&ether_ipv6_udp_pkt, sizeof(ether_ipv6_udp_pkt),
                                 ETH_HLEN /* ip_ofs */, IPPROTO_UDP /* partial_csum */,
                                 ETH_HLEN + offsetof(ipv6hdr, saddr) /* csum_start */,
                                 ETH_HLEN + IPV6_HLEN + offsetof(udphdr, check) /* csum_ofs */,
@@ -150,14 +133,7 @@ TEST(ApfChecksumTest, CalcICMPv6Checksum) {
     }};
     // Set the ICMPv6 checksum to ICMPv6 payload size
     ether_ipv6_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum = htons(sizeof(ether_ipv6_icmp6_pkt) - IPV6_HLEN - ETH_HLEN);
-    uint8_t dscp = calculate_checksum_and_return_dscp((uint8_t *)&ether_ipv6_icmp6_pkt, sizeof(ether_ipv6_icmp6_pkt));
-    EXPECT_EQ(dscp, 6);
-    // verify layer 4 checksum
-    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv6_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum), 0x8a09);
-
-    // Set the ICMPv6 checksum to ICMPv6 payload size
-    ether_ipv6_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum = htons(sizeof(ether_ipv6_icmp6_pkt) - IPV6_HLEN - ETH_HLEN);
-    dscp = csum_and_return_dscp((uint8_t *)&ether_ipv6_icmp6_pkt, sizeof(ether_ipv6_icmp6_pkt),
+    uint8_t dscp = csum_and_return_dscp((uint8_t *)&ether_ipv6_icmp6_pkt, sizeof(ether_ipv6_icmp6_pkt),
                                 ETH_HLEN /* ip_ofs */, IPPROTO_ICMPV6 /* partial_csum */,
                                 ETH_HLEN + offsetof(ipv6hdr, saddr) /* csum_start */,
                                 ETH_HLEN + IPV6_HLEN + offsetof(icmp6hdr, icmp6_cksum) /* csum_ofs */,
