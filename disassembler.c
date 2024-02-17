@@ -302,15 +302,27 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
 
                     break;
                 }
-                case JDNSQMATCH_EXT_OPCODE:
-                case JDNSAMATCH_EXT_OPCODE: {
+                case JDNSQMATCH_EXT_OPCODE:       // 43
+                case JDNSAMATCH_EXT_OPCODE:       // 44
+                case JDNSQMATCHSAFE_EXT_OPCODE:   // 45
+                case JDNSAMATCHSAFE_EXT_OPCODE: { // 46
                     uint32_t offs = DECODE_IMM(1 << (len_field - 1));
-                    uint16_t qtype;
-                    if (imm == JDNSQMATCH_EXT_OPCODE) {
-                        print_opcode(reg_num ? "jdnsqeq" : "jdnsqne");
-                        qtype = DECODE_IMM(1);
-                    } else {
-                        print_opcode(reg_num ? "jdnsaeq" : "jdnsane");
+                    int qtype = -1;
+                    switch(imm) {
+                        case JDNSQMATCH_EXT_OPCODE:
+                            print_opcode(reg_num ? "jdnsqeq" : "jdnsqne");
+                            qtype = DECODE_IMM(1);
+                            break;
+                        case JDNSQMATCHSAFE_EXT_OPCODE:
+                            print_opcode(reg_num ? "jdnsqeqsafe" : "jdnsqnesafe");
+                            qtype = DECODE_IMM(1);
+                            break;
+                        case JDNSAMATCH_EXT_OPCODE:
+                            print_opcode(reg_num ? "jdnsaeq" : "jdnsane"); break;
+                        case JDNSAMATCHSAFE_EXT_OPCODE:
+                            print_opcode(reg_num ? "jdnsaeqsafe" : "jdnsanesafe"); break;
+                        default:
+                            bprintf("unknown_ext %u", imm); break;
                     }
                     bprintf("r0, ");
                     uint32_t end = *ptr2pc;
@@ -320,7 +332,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                     end += 2;
                     print_jump_target(end + offs, program_len);
                     bprintf(", ");
-                    if (imm == JDNSQMATCH_EXT_OPCODE) {
+                    if (imm == JDNSQMATCH_EXT_OPCODE || imm == JDNSQMATCHSAFE_EXT_OPCODE) {
                         bprintf("%d, ", qtype);
                     }
                     while (*ptr2pc < end) {
