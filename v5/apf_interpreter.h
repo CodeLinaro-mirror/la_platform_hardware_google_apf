@@ -111,6 +111,7 @@ int apf_transmit_buffer(void* ctx, uint8_t* ptr, uint32_t len, uint8_t dscp);
  *              the interpreter and will be passed through unmodified
  *              to apf_allocate_buffer() and apf_transmit_buffer() calls.
  * @param program - the program bytecode, followed by the writable data region.
+ *                  Note: this *MUST* be a 4 byte aligned region.
  * @param program_len - the length in bytes of the read-only portion of the APF
  *                    buffer pointed to by {@code program}.
  *                    This is determined by the size of the loaded APF program.
@@ -119,6 +120,7 @@ int apf_transmit_buffer(void* ctx, uint8_t* ptr, uint32_t len, uint8_t dscp);
  *                  portion and the read-write data portion.
  *                  This is expected to be a constant which doesn't change
  *                  value even when a new APF program is loaded.
+ *                  Note: this *MUST* be a multiple of 4.
  * @param packet - the packet bytes, starting from the ethernet header.
  * @param packet_len - the length of {@code packet} in bytes, not
  *                     including trailers/CRC.
@@ -128,7 +130,7 @@ int apf_transmit_buffer(void* ctx, uint8_t* ptr, uint32_t len, uint8_t dscp);
  * @return non-zero if packet should be passed,
  *         zero if packet should be dropped.
  */
-int apf_run(void* ctx, uint8_t* const program, const uint32_t program_len,
+int apf_run(void* ctx, uint32_t* const program, const uint32_t program_len,
             const uint32_t ram_len, const uint8_t* const packet,
             const uint32_t packet_len, const uint32_t filter_age_16384ths);
 

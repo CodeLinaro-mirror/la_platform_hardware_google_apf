@@ -270,11 +270,17 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                         bprintf("%d", alloc_len);
                     }
                     break;
-                case TRANSMITDISCARD_EXT_OPCODE:
-                    if (reg_num == 0) {
-                        print_opcode("discard");
-                    } else  {
-                        print_opcode("transmit");
+                case TRANSMIT_EXT_OPCODE:
+                    print_opcode(reg_num ? "transmitudp" : "transmit");
+                    u8 ip_ofs = DECODE_IMM(1);
+                    u8 csum_ofs = DECODE_IMM(1);
+                    if (csum_ofs < 255) {
+                        u8 csum_start = DECODE_IMM(1);
+                        u16 partial_csum = DECODE_IMM(2);
+                        bprintf("ip_ofs=%d, csum_ofs=%d, csum_start=%d, partial_csum=0x%04x",
+                                ip_ofs, csum_ofs, csum_start, partial_csum);
+                    } else {
+                        bprintf("ip_ofs=%d", ip_ofs);
                     }
                     break;
                 case EWRITE1_EXT_OPCODE: print_opcode("ewrite1"); bprintf("r%d", reg_num); break;

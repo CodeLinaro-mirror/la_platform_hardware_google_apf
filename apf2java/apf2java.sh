@@ -37,9 +37,16 @@ for L in "${LABELS[@]}"; do
   sed -r "s@^( +${L}:)@\ngen.defineLabel(LABEL_${L});\n\1@" < tmp > tmp2
   cat tmp2 > tmp
 done
-sed -r 's@^ +[0-9]+: @@' < tmp > tmp2
-cat tmp2 > tmp
-sed -r 's@(LABEL_[0-9]+)@"\1"@' < tmp > tmp2
+
+sed -r \
+'s@^ +[0-9]+: @@;'\
+'s@(LABEL_[0-9]+)@"\1"@;'\
+"s@\"LABEL_${LABELS[-1]}\"@\"LABEL_INC_AND_DROP\"@;"\
+"s@\"LABEL_${LABELS[-2]}\"@\"LABEL_INC_AND_PASS\"@;"\
+"s@\"LABEL_${LABELS[-3]}\"@\"LABEL_UNSOLICITED_MULTICAST_NA\"@;"\
+< tmp > tmp2
+# The above label renames are based on what our current generator emits as prologue.
+
 if [[ "$(egrep -v '^$|gen' < tmp2 | wc -l)" != 0 ]]; then
   echo 'Failure to translate:'
   egrep -v '^$|gen' < tmp2

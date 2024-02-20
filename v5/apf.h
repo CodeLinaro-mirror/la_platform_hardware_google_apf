@@ -1,5 +1,5 @@
 /*
- * Copyright 2023, The Android Open Source Project
+ * Copyright 2024, The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,9 +24,11 @@
  *  2. Two 32-bit registers, called R0 and R1.
  *  3. Sixteen 32-bit temporary memory slots (cleared between packets).
  *  4. A read-only packet.
+ *  5. An optional read-write transmit buffer.
  * The program is executed by the interpreter below and parses the packet
  * to determine if the application processor (AP) should be woken up to
- * handle the packet or if can be dropped.
+ * handle the packet or if it can be dropped.  The program may also choose
+ * to allocate/transmit/deallocate the transmit buffer.
  *
  * APF bytecode description:
  *
@@ -35,16 +37,16 @@
  *
  * Each instruction starts with a byte composed of:
  *  Top 5 bits form "opcode" field, see *_OPCODE defines below.
- *  Next 2 bits form "size field", which indicate the length of an immediate
+ *  Next 2 bits form "size field", which indicates the length of an immediate
  *  value which follows the first byte.  Values in this field:
  *                 0 => immediate value is 0 and no bytes follow.
  *                 1 => immediate value is 1 byte big.
  *                 2 => immediate value is 2 bytes big.
  *                 3 => immediate value is 4 bytes big.
- *  Bottom bit forms "register" field, which indicates which register this
- *  instruction operates on.
+ *  Bottom bit forms "register" field, which (usually) indicates which register
+ *  this instruction operates on.
  *
- *  There are three main categories of instructions:
+ *  There are four main categories of instructions:
  *  Load instructions
  *    These instructions load byte(s) of the packet into a register.
  *    They load either 1, 2 or 4 bytes, as determined by the "opcode" field.
@@ -79,24 +81,32 @@
  *    The type of comparison (e.g. equal to, greater than etc) is determined
  *    by the "opcode" field. The comparison interprets both values being
  *    compared as unsigned values.
+ *  Miscellaneous instructions
+ *    Instructions for:
+ *      - allocating/transmitting/deallocating transmit buffer
+ *      - building the transmit packet (copying bytes into it)
+ *      - read/writing data section
  *
  *  Miscellaneous details:
  *
  *  Pre-filled temporary memory slot values
- *    When the APF program begins execution, three of the sixteen memory slots
+ *    When the APF program begins execution, six of the sixteen memory slots
  *    are pre-filled by the interpreter with values that may be useful for
  *    programs:
+ *      #0 to #8 are zero initialized.
+ *      Slot #9  this is slot #15 with greater resolution (1/16384ths of a second)
+ *      Slot #10 starts at zero, implicitly used as tx buffer output pointer.
  *      Slot #11 contains the size (in bytes) of the APF program.
- *      Slot #12 contains the total size of the APF buffer (program + data).
+ *      Slot #12 contains the total size of the APF program + data.
  *      Slot #13 is filled with the IPv4 header length. This value is calculated
  *               by loading the first byte of the IPv4 header and taking the
  *               bottom 4 bits and multiplying their value by 4. This value is
  *               set to zero if the first 4 bits after the link layer header are
  *               not 4, indicating not IPv4.
  *      Slot #14 is filled with size of the packet in bytes, including the
- *               link-layer header if any.
+ *               ethernet link-layer header.
  *      Slot #15 is filled with the filter age in seconds. This is the number of
- *               seconds since the AP sent the program to the chipset. This may
+ *               seconds since the host installed the program. This may
  *               be used by filters that should have a particular lifetime. For
  *               example, it can be used to rate-limit particular packets to one
  *               every N seconds.
@@ -140,21 +150,25 @@ typedef union {
   u32 slot[MEMORY_ITEMS];
 } memory_type;
 
-/* Unconditionally pass (if R=0) or drop (if R=1) packet.
- * An optional unsigned immediate value can be provided to encode the counter number.
- * the value is non-zero, the instruction increments the counter.
+/* ---------------------------------------------------------------------------------------------- */
+
+// Standard opcodes.
+
+/* Unconditionally pass (if R=0) or drop (if R=1) packet and optionally increment counter.
+ * An optional non-zero unsigned immediate value can be provided to encode the counter number.
  * The counter is located (-4 * counter number) bytes from the end of the data region.
  * It is a U32 big-endian value and is always incremented by 1.
- * This is more or less equivalent to: lddw R0, -N4; add R0,1; stdw R0, -N4; {pass,drop}
- * e.g. "pass", "pass 1", "drop", "drop 1".
+ * This is more or less equivalent to: lddw R0, -4*N; add R0, 1; stdw R0, -4*N; {pass,drop}
+ * e.g. "pass", "pass 1", "drop", "drop 1"
  */
 #define PASSDROP_OPCODE 0
-#define LDB_OPCODE 1    // Load 1 byte from immediate offset, e.g. "ldb R0, [5]"
+
+#define LDB_OPCODE 1    // Load 1 byte  from immediate offset, e.g. "ldb R0, [5]"
 #define LDH_OPCODE 2    // Load 2 bytes from immediate offset, e.g. "ldh R0, [5]"
 #define LDW_OPCODE 3    // Load 4 bytes from immediate offset, e.g. "ldw R0, [5]"
-#define LDBX_OPCODE 4   // Load 1 byte from immediate offset plus register, e.g. "ldbx R0, [5+R0]"
-#define LDHX_OPCODE 5   // Load 2 byte from immediate offset plus register, e.g. "ldhx R0, [5+R0]"
-#define LDWX_OPCODE 6   // Load 4 byte from immediate offset plus register, e.g. "ldwx R0, [5+R0]"
+#define LDBX_OPCODE 4   // Load 1 byte  from immediate offset plus register, e.g. "ldbx R0, [5+R0]"
+#define LDHX_OPCODE 5   // Load 2 bytes from immediate offset plus register, e.g. "ldhx R0, [5+R0]"
+#define LDWX_OPCODE 6   // Load 4 bytes from immediate offset plus register, e.g. "ldwx R0, [5+R0]"
 #define ADD_OPCODE 7    // Add, e.g. "add R0,5"
 #define MUL_OPCODE 8    // Multiply, e.g. "mul R0,5"
 #define DIV_OPCODE 9    // Divide, e.g. "div R0,5"
@@ -170,24 +184,30 @@ typedef union {
 #define JSET_OPCODE 19  // Compare any bits set and branch, e.g. "jset R0,5,label"
 #define JBSMATCH_OPCODE 20 // Compare byte sequence [R=0 not] equal, e.g. "jbsne R0,2,label,0x1122"
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
-#define LDDW_OPCODE 22  // Load 4 bytes from data address (register + simm): "lddw R0, [5+R1]"
-#define STDW_OPCODE 23  // Store 4 bytes to data address (register + simm): "stdw R0, [5+R1]"
-/* Write 1, 2 or 4 bytes immediate to the output buffer and auto-increment the pointer to
- * write. e.g. "write 5"
+#define LDDW_OPCODE 22  // Load 4 bytes from data address (register + signed imm): "lddw R0, [5+R1]"
+#define STDW_OPCODE 23  // Store 4 bytes to data address (register + signed imm): "stdw R0, [5+R1]"
+
+/* Write 1, 2 or 4 byte immediate to the output buffer and auto-increment the output buffer pointer.
+ * Immediate length field specifies size of write.  R must be 0.  imm_len != 0.
+ * e.g. "write 5"
  */
 #define WRITE_OPCODE 24
+
 /* Copy bytes from input packet/APF program/data region to output buffer and
  * auto-increment the output buffer pointer.
  * Register bit is used to specify the source of data copy.
  * R=0 means copy from packet.
  * R=1 means copy from APF program/data region.
- * The copy length is stored in (u8)imm2.
- * e.g. "pktcopy 5, 5" "datacopy 5, 5"
+ * The source offset is stored in imm1, copy length is stored in u8 imm2.
+ * e.g. "pktcopy 0, 16" or "datacopy 0, 16"
  */
 #define PKTDATACOPY_OPCODE 25
 
-// Extended opcodes. These all have an opcode of EXT_OPCODE
-// and specify the actual opcode in the immediate field.
+/* ---------------------------------------------------------------------------------------------- */
+
+// Extended opcodes.
+// These all have an opcode of EXT_OPCODE and specify the actual opcode in the immediate field.
+
 #define LDM_EXT_OPCODE 0   // Load from temporary memory, e.g. "ldm R0,5"
   // Values 0-15 represent loading the different temporary memory slots.
 #define STM_EXT_OPCODE 16  // Store to temporary memory, e.g. "stm R0,5"
@@ -197,26 +217,31 @@ typedef union {
 #define SWAP_EXT_OPCODE 34 // Swap, e.g. "swap R0,R1"
 #define MOV_EXT_OPCODE 35  // Move, e.g. "move R0,R1"
 
-
 /* Allocate writable output buffer.
- * R=0, use register R0 to store the length. R=1, encode the length in the u16 int imm2.
- * "e.g. allocate R0"
- * "e.g. allocate 123"
+ * R=0: register R0 specifies the length
+ * R=1: length provided in u16 imm2
+ * e.g. "allocate R0" or "allocate 123"
+ * On failure automatically executes 'pass 3'
  */
 #define ALLOCATE_EXT_OPCODE 36
 /* Transmit and deallocate the buffer (transmission can be delayed until the program
- * terminates). R=0 means discard the buffer, R=1 means transmit the buffer.
- * "e.g. trans"
- * "e.g. discard"
+ * terminates).  Length of buffer is the output buffer pointer (0 means discard).
+ * R=1 iff udp style L4 checksum
+ * u8 imm2 - ip header offset from start of buffer (255 for non-ip packets)
+ * u8 imm3 - offset from start of buffer to store L4 checksum (255 for no L4 checksum)
+ * u8 imm4 - offset from start of buffer to begin L4 checksum calculation (present iff imm3 != 255)
+ * u16 imm5 - partial checksum value to include in L4 checksum (present iff imm3 != 255)
+ * "e.g. transmit"
  */
-#define TRANSMITDISCARD_EXT_OPCODE 37
+#define TRANSMIT_EXT_OPCODE 37
 /* Write 1, 2 or 4 byte value from register to the output buffer and auto-increment the
  * output buffer pointer.
- * e.g. "ewrite1 r0"
+ * e.g. "ewrite1 r0" or "ewrite2 r1"
  */
 #define EWRITE1_EXT_OPCODE 38
 #define EWRITE2_EXT_OPCODE 39
 #define EWRITE4_EXT_OPCODE 40
+
 /* Copy bytes from input packet/APF program/data region to output buffer and
  * auto-increment the output buffer pointer.
  * Register bit is used to specify the source of data copy.
@@ -227,27 +252,35 @@ typedef union {
  */
 #define EPKTDATACOPYIMM_EXT_OPCODE 41
 #define EPKTDATACOPYR1_EXT_OPCODE 42
-/* Jumps if the UDP payload content (starting at R0) does not contain the specified QNAME,
- * applying MDNS case insensitivity.
- * R0: Offset to UDP payload content
- * imm1: Opcode
- * imm2: Label offset
- * imm3(u8): Question type (PTR/SRV/TXT/A/AAAA)
- * imm4(bytes): TLV-encoded QNAME list (null-terminated)
- * e.g.: "jdnsqmatch R0,label,0x0c,\002aa\005local\0\0"
- */
-#define JDNSQMATCH_EXT_OPCODE 43
-/* Jumps if the UDP payload content (starting at R0) does not contain one
- * of the specified NAMEs in answers/authority/additional records, applying
- * case insensitivity.
+/* Jumps if the UDP payload content (starting at R0) does [not] match one
+ * of the specified QNAMEs in question records, applying case insensitivity.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
  * R=0/1 meaning 'does not match'/'matches'
  * R0: Offset to UDP payload content
- * imm1: Opcode
- * imm2: Label offset
- * imm3(bytes): TLV-encoded QNAME list (null-terminated)
- * e.g.: "jdnsamatch R0,label,0x0c,\002aa\005local\0\0"
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(u8): Question type (PTR/SRV/TXT/A/AAAA)
+ * imm4(bytes): null terminated list of null terminated LV-encoded QNAMEs
+ * e.g.: "jdnsqeq R0,label,0xc,\002aa\005local\0\0", "jdnsqne R0,label,0xc,\002aa\005local\0\0"
+ */
+#define JDNSQMATCH_EXT_OPCODE 43
+#define JDNSQMATCHSAFE_EXT_OPCODE 45
+/* Jumps if the UDP payload content (starting at R0) does [not] match one
+ * of the specified NAMEs in answers/authority/additional records, applying
+ * case insensitivity.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
+ * R=0/1 meaning 'does not match'/'matches'
+ * R0: Offset to UDP payload content
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(bytes): null terminated list of null terminated LV-encoded NAMEs
+ * e.g.: "jdnsaeq R0,label,0xc,\002aa\005local\0\0", "jdnsane R0,label,0xc,\002aa\005local\0\0"
  */
 #define JDNSAMATCH_EXT_OPCODE 44
+#define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+// This extended opcode is used to implement PKTDATACOPY_OPCODE
+#define PKTDATACOPYIMM_EXT_OPCODE 65536
 
 #define EXTRACT_OPCODE(i) (((i) >> 3) & 31)
 #define EXTRACT_REGISTER(i) ((i) & 1)
