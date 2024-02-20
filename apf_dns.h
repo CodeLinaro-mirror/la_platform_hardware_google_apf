@@ -38,15 +38,21 @@ match_result_type match_single_name(const u8* needle,
             u8 label_size = v;
             if (*ofs + label_size > udp_len) return error_packet;
             if (needle >= needle_bound) return error_program;
-            if (is_qname_match && label_size == *needle++) {
-                if (needle + label_size > needle_bound) return error_program;
-                while (label_size--) {
-                    u8 w = udp[(*ofs)++];
-                    is_qname_match &= (uppercase(w) == *needle++);
+            if (is_qname_match) {
+                u8 len = *needle++;
+                if (len == label_size) {
+                    if (needle + label_size > needle_bound) return error_program;
+                    while (label_size--) {
+                        u8 w = udp[(*ofs)++];
+                        is_qname_match &= (uppercase(w) == *needle++);
+                    }
+                } else {
+                    if (len != 0xFF) is_qname_match = false;
+                    *ofs += label_size;
                 }
             } else {
-                *ofs += label_size;
                 is_qname_match = false;
+                *ofs += label_size;
             }
         } else { /* reached the end of the name */
             if (first_unread_offset > *ofs) *ofs = first_unread_offset;
@@ -109,6 +115,7 @@ match_result_type match_names(const u8* needles,
         /* move needles pointer to the next needle. */
         do {
             u8 len = *needles++;
+            if (len == 0xFF) continue;
             if (len > 63) return error_program;
             needles += len;
             if (needles >= needle_bound) return error_program;

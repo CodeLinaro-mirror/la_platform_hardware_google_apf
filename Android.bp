@@ -1,6 +1,7 @@
 // Copyright 2016 The Android Open Source Project
 
 package {
+    default_team: "trendy_team_fwk_core_networking",
     default_applicable_licenses: ["hardware_google_apf_license"],
 }
 
