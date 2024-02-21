@@ -42,6 +42,7 @@ uint8_t* apf_allocate_buffer(__attribute__ ((unused)) void* ctx, uint32_t size) 
  */
 int apf_transmit_buffer(__attribute__((unused)) void* ctx, uint8_t* ptr,
                         uint32_t len, uint8_t dscp) {
+  if (len && len < ETH_HLEN) return -1;
   if (ptr != apf_test_buffer) return -1;
   apf_test_tx_packet_len = len;
   apf_test_tx_dscp = dscp;
