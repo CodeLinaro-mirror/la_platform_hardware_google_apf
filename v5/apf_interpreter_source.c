@@ -16,7 +16,7 @@
 
 #include "apf_interpreter.h"
 
-#include <string.h>  // For memcmp, memmove, memset
+#include <string.h>  // For memcmp, memcpy, memset
 
 #if __GNUC__ >= 7 || __clang__
 #define FALLTHROUGH __attribute__((fallthrough))
@@ -55,7 +55,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240209;
+    return 20240214;
 }
 
 typedef struct {
@@ -171,7 +171,7 @@ static int do_apf_run(apf_context* ctx) {
               if (len_field > 2) return PASS_PACKET;  // max 64K counters (ie. imm < 64K)
               if (imm) {
                   if (4 * imm > ctx->ram_len) return PASS_PACKET;
-                  counter[-imm]++;
+                  counter[-(s32)imm]++;
               }
               return reg_num ? DROP_PACKET : PASS_PACKET;
           }
@@ -364,10 +364,10 @@ static int do_apf_run(apf_context* ctx) {
                         const u32 last_packet_offs = pktcopy_src_offset + copy_len - 1;
                         ASSERT_RETURN(last_packet_offs >= pktcopy_src_offset);
                         ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                        memmove(ctx->tx_buf + dst_offs, ctx->packet + pktcopy_src_offset, copy_len);
+                        memcpy(ctx->tx_buf + dst_offs, ctx->packet + pktcopy_src_offset, copy_len);
                     } else {  // copy from data
                         ASSERT_IN_RAM_BOUNDS(pktcopy_src_offset + copy_len - 1);
-                        memmove(ctx->tx_buf + dst_offs, ctx->program + pktcopy_src_offset, copy_len);
+                        memcpy(ctx->tx_buf + dst_offs, ctx->program + pktcopy_src_offset, copy_len);
                     }
                     dst_offs += copy_len;
                     ctx->mem.named.tx_buf_offset = dst_offs;
