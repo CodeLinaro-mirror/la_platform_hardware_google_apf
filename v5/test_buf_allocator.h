@@ -18,6 +18,7 @@
 #define TEST_BUF_ALLOCATOR
 
 #include <stdint.h>
+#include <linux/if_ether.h>
 
 extern uint8_t apf_test_buffer[1514];
 extern uint32_t apf_test_tx_packet_len;

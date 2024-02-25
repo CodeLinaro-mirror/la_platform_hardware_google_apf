@@ -143,4 +143,51 @@ TEST(ApfChecksumTest, CalcICMPv6Checksum) {
     EXPECT_EQ(read_be16((uint8_t *)&ether_ipv6_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum), 0x8a09);
 }
 
+TEST(ApfChecksumTest, CalcICMPv6ChecksumWithHopByHopOption) {
+    // An ICMPv6 packet(including hop-by-hop option) with checksum field set to 0
+    union packed {
+        uint8_t data[90];
+        struct packed {
+          struct ethhdr ethhdr;
+          struct ipv6hdr ipv6hdr;
+          uint8_t hopopts[8];
+          struct icmp6hdr icmp6hdr;
+          uint8_t icmpv6_payload[];
+        } pkt;
+    } ether_ipv6_hopopts_icmp6_pkt = {{
+        0x33, 0x33, 0x00, 0x00, 0x00, 0x16,
+        0xe0, 0x4f, 0x43, 0xe6, 0xfb, 0xcf,
+        0x86, 0xdd, // end of ethernet header
+        0x60, 0x00, 0x00, 0x00,
+        0x00, 0x24,
+        0x00,
+        0x01,
+        0xfe, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x71, 0x6b, 0xe2, 0xfe, 0xd6, 0x53, 0x4e, 0xe0,
+        0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, // end of ipv6 header
+        0x3a, 0x00, 0x05, 0x02, 0x00, 0x00, 0x01, 0x00, // end of hop-by-hop option
+        0x8f,
+        0x00,
+        0x00, 0x00, // end of icmpv6 header
+        0x00, 0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00, 0xff, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c
+    }};
+
+    // Set the ICMPv6 checksum to ICMPv6 (header + payload) size + ~{16-bit sum of hop-by-hop header}
+    ether_ipv6_hopopts_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum =
+        htons(sizeof(ether_ipv6_hopopts_icmp6_pkt) - IPV6_HLEN - ETH_HLEN
+              - sizeof(ether_ipv6_hopopts_icmp6_pkt.pkt.hopopts)
+              + 0xbffd); // 0xffff - (0x3a00 + 0x0502 + 0x0000 + 0x0100) = 0xbffd
+    uint8_t dscp = csum_and_return_dscp((uint8_t *)&ether_ipv6_hopopts_icmp6_pkt,
+                                        sizeof(ether_ipv6_hopopts_icmp6_pkt),
+                                        ETH_HLEN /* ip_ofs */, IPPROTO_ICMPV6 /* partial_csum */,
+                                        ETH_HLEN + offsetof(ipv6hdr, saddr) /* csum_start */,
+                                        ETH_HLEN + IPV6_HLEN
+                                        + sizeof(ether_ipv6_hopopts_icmp6_pkt.pkt.hopopts)
+                                        + offsetof(icmp6hdr, icmp6_cksum) /* csum_ofs */,
+                                        false /* udp */);
+    EXPECT_EQ(dscp, 0);
+    // verify layer 4 checksum
+    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv6_hopopts_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum), 0xf760);
+}
+
 }  // namespace apf
