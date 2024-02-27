@@ -24,7 +24,13 @@
 #define FALLTHROUGH
 #endif
 
-typedef enum { false, true } bool;
+#undef bool
+#undef true
+#undef false
+typedef enum { False, True } Boolean;
+#define bool Boolean
+#define true True
+#define false False
 
 #include "apf_defs.h"
 #include "apf.h"
@@ -55,7 +61,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240214;
+    return 20240226;
 }
 
 typedef struct {
@@ -74,7 +80,7 @@ typedef struct {
     memory_type mem;   // Memory slot values.
 } apf_context;
 
-int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp) {
+FUNC(int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
     int ret = apf_transmit_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;

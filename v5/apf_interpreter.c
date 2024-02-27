@@ -24,7 +24,13 @@
 #define FALLTHROUGH
 #endif
 
-typedef enum { false, true } bool;
+#undef bool
+#undef true
+#undef false
+typedef enum { False, True } Boolean;
+#define bool Boolean
+#define true True
+#define false False
 
 /* Begin include of apf_defs.h */
 typedef int8_t s8;
@@ -66,6 +72,8 @@ typedef enum {
 #define IPV6_HLEN	40
 #define TCP_HLEN	20
 #define UDP_HLEN	8
+
+#define FUNC(x) x; x
 /* End include of apf_defs.h */
 /* Begin include of apf.h */
 /*
@@ -387,11 +395,11 @@ static u8 uppercase(u8 c) {
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_single_name(const u8* needle,
+FUNC(match_result_type match_single_name(const u8* needle,
                                     const u8* const needle_bound,
                                     const u8* const udp,
                                     const u32 udp_len,
-                                    u32* const ofs) {
+                                    u32* const ofs)) {
     u32 first_unread_offset = *ofs;
     bool is_qname_match = true;
     int lvl;
@@ -450,11 +458,11 @@ match_result_type match_single_name(const u8* needle,
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_names(const u8* needles,
+FUNC(match_result_type match_names(const u8* needles,
                               const u8* const needle_bound,
                               const u8* const udp,
                               const u32 udp_len,
-                              const int question_type) {
+                              const int question_type)) {
     if (udp_len < 12) return error_packet;  /* lack of dns header */
 
     /* dns header: be16 tid, flags, num_{questions,answers,authority,additional} */
@@ -504,7 +512,7 @@ match_result_type match_names(const u8* needles,
  * Calculate big endian 16-bit sum of a buffer (max 128kB),
  * then fold and negate it, producing a 16-bit result in [0..FFFE].
  */
-u16 calc_csum(u32 sum, const u8* const buf, const s32 len) {
+FUNC(u16 calc_csum(u32 sum, const u8* const buf, const s32 len)) {
     s32 i;
     for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
 
@@ -546,8 +554,8 @@ static u16 fix_udp_csum(u16 csum) {
  *
  * @return 6-bit DSCP value [0..63], garbage on parse error.
  */
-int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
-  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp) {
+FUNC(int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
+  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp)) {
     if (csum_ofs < 255) {
         /* note that calc_csum() treats negative lengths as zero */
         u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
@@ -590,7 +598,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240214;
+    return 20240226;
 }
 
 typedef struct {
@@ -609,7 +617,7 @@ typedef struct {
     memory_type mem;   /* Memory slot values. */
 } apf_context;
 
-int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp) {
+FUNC(int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
     int ret = apf_transmit_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;
