@@ -24,13 +24,7 @@
 #define FALLTHROUGH
 #endif
 
-#undef bool
-#undef true
-#undef false
 typedef enum { False, True } Boolean;
-#define bool Boolean
-#define true True
-#define false False
 
 /* Begin include of apf_defs.h */
 typedef int8_t s8;
@@ -44,8 +38,8 @@ typedef uint32_t u32;
 typedef enum {
   error_program = -2,
   error_packet = -1,
-  nomatch = false,
-  match = true,
+  nomatch = False,
+  match = True,
 } match_result_type;
 
 #define ETH_P_IP	0x0800
@@ -401,7 +395,7 @@ FUNC(match_result_type match_single_name(const u8* needle,
                                     const u32 udp_len,
                                     u32* const ofs)) {
     u32 first_unread_offset = *ofs;
-    bool is_qname_match = true;
+    Boolean is_qname_match = True;
     int lvl;
 
     /* DNS names are <= 255 characters including terminating 0, since >= 1 char + '.' per level => max. 127 levels */
@@ -430,11 +424,11 @@ FUNC(match_result_type match_single_name(const u8* needle,
                         is_qname_match &= (uppercase(w) == *needle++);
                     }
                 } else {
-                    if (len != 0xFF) is_qname_match = false;
+                    if (len != 0xFF) is_qname_match = False;
                     *ofs += label_size;
                 }
             } else {
-                is_qname_match = false;
+                is_qname_match = False;
                 *ofs += label_size;
             }
         } else { /* reached the end of the name */
@@ -470,7 +464,7 @@ FUNC(match_result_type match_names(const u8* needles,
     u32 num_answers = read_be16(udp + 6) + read_be16(udp + 8) + read_be16(udp + 10);
 
     /* loop until we hit final needle, which is a null byte */
-    while (true) {
+    while (True) {
         if (needles >= needle_bound) return error_program;
         if (!*needles) return nomatch;  /* we've run out of needles without finding a match */
         u32 ofs = 12;  /* dns header is 12 bytes */
@@ -550,12 +544,12 @@ static u16 fix_udp_csum(u16 csum) {
  *                     calculation (until end of pkt specified by len)
  * @param csum_ofs - offset from beginning of pkt to store L4 checksum
  *                   255 means do not calculate/store L4 checksum
- * @param udp - true iff we should generate a UDP style L4 checksum (0 -> 0xFFFF)
+ * @param udp - True iff we should generate a UDP style L4 checksum (0 -> 0xFFFF)
  *
  * @return 6-bit DSCP value [0..63], garbage on parse error.
  */
 FUNC(int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
-  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp)) {
+  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const Boolean udp)) {
     if (csum_ofs < 255) {
         /* note that calc_csum() treats negative lengths as zero */
         u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
@@ -759,7 +753,7 @@ static int do_apf_run(apf_context* ctx) {
                 /* First invocation of APFv6 jmpdata instruction */
                 counter[-1] = 0x12345678;  /* endianness marker */
                 counter[-2]++;  /* total packets ++ */
-                ctx->v6 = (u8)true;
+                ctx->v6 = (u8)True;
               }
               /* This can jump backwards. Infinite looping prevented by instructions_remaining. */
               ctx->pc += imm;
@@ -886,7 +880,7 @@ static int do_apf_run(apf_context* ctx) {
                     }
                     int dscp = csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
                                                     partial_csum, csum_start, csum_ofs,
-                                                    (bool)reg_num);
+                                                    (Boolean)reg_num);
                     int ret = do_transmit_buffer(ctx, pkt_len, dscp);
                     if (ret) { counter[-4]++; return PASS_PACKET; } /* transmit failure */
                     break;
@@ -942,7 +936,7 @@ static int do_apf_run(apf_context* ctx) {
                         ctx->pc++;
                     }
                     ctx->pc += 2;  /* skip the final double 0 needle end */
-                    /* relies on reg_num in {0,1} and match_rst being {false=0, true=1} */
+                    /* relies on reg_num in {0,1} and match_rst being {False=0, True=1} */
                     if (!(reg_num ^ (u32)match_rst)) ctx->pc += jump_offs;
                     break;
                   }
