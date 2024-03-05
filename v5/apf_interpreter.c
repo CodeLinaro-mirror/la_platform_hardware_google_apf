@@ -389,7 +389,7 @@ static u8 uppercase(u8 c) {
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-FUNC(match_result_type match_single_name(const u8* needle,
+FUNC(match_result_type apf_internal_match_single_name(const u8* needle,
                                     const u8* const needle_bound,
                                     const u8* const udp,
                                     const u32 udp_len,
@@ -452,7 +452,7 @@ FUNC(match_result_type match_single_name(const u8* needle,
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-FUNC(match_result_type match_names(const u8* needles,
+FUNC(match_result_type apf_internal_match_names(const u8* needles,
                               const u8* const needle_bound,
                               const u8* const udp,
                               const u32 udp_len,
@@ -471,7 +471,7 @@ FUNC(match_result_type match_names(const u8* needles,
         u32 i;
         /* match questions */
         for (i = 0; i < num_questions; ++i) {
-            match_result_type m = match_single_name(needles, needle_bound, udp, udp_len, &ofs);
+            match_result_type m = apf_internal_match_single_name(needles, needle_bound, udp, udp_len, &ofs);
             if (m < nomatch) return m;
             if (ofs + 2 > udp_len) return error_packet;
             int qtype = (int)read_be16(udp + ofs);
@@ -482,7 +482,7 @@ FUNC(match_result_type match_names(const u8* needles,
         }
         /* match answers */
         if (question_type == -1) for (i = 0; i < num_answers; ++i) {
-            match_result_type m = match_single_name(needles, needle_bound, udp, udp_len, &ofs);
+            match_result_type m = apf_internal_match_single_name(needles, needle_bound, udp, udp_len, &ofs);
             if (m < nomatch) return m;
             ofs += 8; /* skip be16 type, class & be32 ttl */
             if (ofs + 2 > udp_len) return error_packet;
@@ -506,7 +506,7 @@ FUNC(match_result_type match_names(const u8* needles,
  * Calculate big endian 16-bit sum of a buffer (max 128kB),
  * then fold and negate it, producing a 16-bit result in [0..FFFE].
  */
-FUNC(u16 calc_csum(u32 sum, const u8* const buf, const s32 len)) {
+FUNC(u16 apf_internal_calc_csum(u32 sum, const u8* const buf, const s32 len)) {
     s32 i;
     for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
 
@@ -548,18 +548,18 @@ static u16 fix_udp_csum(u16 csum) {
  *
  * @return 6-bit DSCP value [0..63], garbage on parse error.
  */
-FUNC(int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
+FUNC(int apf_internal_csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
   const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const Boolean udp)) {
     if (csum_ofs < 255) {
-        /* note that calc_csum() treats negative lengths as zero */
-        u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
+        /* note that apf_internal_calc_csum() treats negative lengths as zero */
+        u32 csum = apf_internal_calc_csum(partial_csum, pkt + csum_start, len - csum_start);
         if (udp) csum = fix_udp_csum(csum);
         store_be16(pkt + csum_ofs, csum);
     }
     if (ip_ofs < 255) {
         u8 ip = pkt[ip_ofs] >> 4;
         if (ip == 4) {
-            store_be16(pkt + ip_ofs + 10, calc_csum(0, pkt + ip_ofs, IPV4_HLEN));
+            store_be16(pkt + ip_ofs + 10, apf_internal_calc_csum(0, pkt + ip_ofs, IPV4_HLEN));
             return pkt[ip_ofs + 1] >> 2;  /* DSCP */
         } else if (ip == 6) {
             return (read_be16(pkt + ip_ofs) >> 6) & 0x3F;  /* DSCP */
@@ -611,7 +611,7 @@ typedef struct {
     memory_type mem;   /* Memory slot values. */
 } apf_context;
 
-FUNC(int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
+FUNC(int apf_internal_do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
     int ret = apf_transmit_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;
@@ -619,7 +619,7 @@ FUNC(int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
 }
 
 static int do_discard_buffer(apf_context* ctx) {
-    return do_transmit_buffer(ctx, 0 /* pkt_len */, 0 /* dscp */);
+    return apf_internal_do_transmit_buffer(ctx, 0 /* pkt_len */, 0 /* dscp */);
 }
 
 /* Decode the imm length, does not do range checking. */
@@ -878,10 +878,10 @@ static int do_apf_run(apf_context* ctx) {
                         csum_start = DECODE_U8();         /* 4th imm, at worst 7 B past prog_len */
                         partial_csum = decode_be16(ctx);  /* 5th imm, at worst 9 B past prog_len */
                     }
-                    int dscp = csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
+                    int dscp = apf_internal_csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
                                                     partial_csum, csum_start, csum_ofs,
                                                     (Boolean)reg_num);
-                    int ret = do_transmit_buffer(ctx, pkt_len, dscp);
+                    int ret = apf_internal_do_transmit_buffer(ctx, pkt_len, dscp);
                     if (ret) { counter[-4]++; return PASS_PACKET; } /* transmit failure */
                     break;
                   case EPKTDATACOPYIMM_EXT_OPCODE:  /* 41 */
@@ -921,7 +921,7 @@ static int do_apf_run(apf_context* ctx) {
                         qtype = DECODE_U8();  /* 3rd imm, at worst 9 bytes past prog_len */
                     }
                     u32 udp_payload_offset = ctx->R[0];
-                    match_result_type match_rst = match_names(ctx->program + ctx->pc,
+                    match_result_type match_rst = apf_internal_match_names(ctx->program + ctx->pc,
                                                               ctx->program + ctx->program_len,
                                                               ctx->packet + udp_payload_offset,
                                                               ctx->packet_len - udp_payload_offset,
