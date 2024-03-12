@@ -165,7 +165,8 @@ typedef enum {
  *    When the APF program begins execution, six of the sixteen memory slots
  *    are pre-filled by the interpreter with values that may be useful for
  *    programs:
- *      #0 to #8 are zero initialized.
+ *      #0 to #7 are zero initialized.
+ *      Slot #8  is initialized with apf version (on APF >4).
  *      Slot #9  this is slot #15 with greater resolution (1/16384ths of a second)
  *      Slot #10 starts at zero, implicitly used as tx buffer output pointer.
  *      Slot #11 contains the size (in bytes) of the APF program.
@@ -210,7 +211,8 @@ typedef enum {
 
 typedef union {
   struct {
-    u32 pad[9];               /* 0..8 */
+    u32 pad[8];               /* 0..7 */
+    u32 apf_version;          /* 8:  Initialized with apf_version() */
     u32 filter_age_16384ths;  /* 9:  Age since filter installed in 1/16384 seconds. */
     u32 tx_buf_offset;        /* 10: Offset in tx_buf where next byte will be written */
     u32 program_size;         /* 11: Size of program (in bytes) */
@@ -592,7 +594,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240226;
+    return 20240312;
 }
 
 typedef struct {
@@ -704,7 +706,7 @@ static int do_apf_run(apf_context* ctx) {
 
       u32 pktcopy_src_offset = 0;  /* used for various pktdatacopy opcodes */
       switch (opcode) {
-          case PASSDROP_OPCODE: {
+          case PASSDROP_OPCODE: {  /* APFv6+ */
               if (len_field > 2) return PASS_PACKET;  /* max 64K counters (ie. imm < 64K) */
               if (imm) {
                   if (4 * imm > ctx->ram_len) return PASS_PACKET;
@@ -749,7 +751,7 @@ static int do_apf_run(apf_context* ctx) {
               break;
           }
           case JMP_OPCODE:
-              if (reg_num && !ctx->v6) {
+              if (reg_num && !ctx->v6) {  /* APFv6+ */
                 /* First invocation of APFv6 jmpdata instruction */
                 counter[-1] = 0x12345678;  /* endianness marker */
                 counter[-2]++;  /* total packets ++ */
@@ -914,7 +916,7 @@ static int do_apf_run(apf_context* ctx) {
                   case JDNSAMATCH_EXT_OPCODE:       /* 44 */
                   case JDNSQMATCHSAFE_EXT_OPCODE:   /* 45 */
                   case JDNSAMATCHSAFE_EXT_OPCODE: { /* 46 */
-                    const u32 imm_len = 1 << (len_field - 1);
+                    const u32 imm_len = 1 << (len_field - 1); /* EXT_OPCODE, thus len_field > 0 */
                     u32 jump_offs = decode_imm(ctx, imm_len); /* 2nd imm, at worst 8 B past prog_len */
                     int qtype = -1;
                     if (imm & 1) { /* JDNSQMATCH & JDNSQMATCHSAFE are *odd* extended opcodes */
@@ -1032,6 +1034,7 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
   apf_ctx.mem.named.program_size = program_len;
   apf_ctx.mem.named.ram_len = ram_len;
   apf_ctx.mem.named.packet_size = packet_len;
+  apf_ctx.mem.named.apf_version = apf_version();
   apf_ctx.mem.named.filter_age = filter_age_16384ths >> 14;
   apf_ctx.mem.named.filter_age_16384ths = filter_age_16384ths;
 
