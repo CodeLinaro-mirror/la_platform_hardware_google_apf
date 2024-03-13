@@ -171,6 +171,11 @@ static int do_apf_run(apf_context* ctx) {
           signed_imm >>= (4 - imm_len) * 8;
       }
 
+      // See comment at ADD_OPCODE for the reason for ARITH_REG/arith_imm/arith_signed_imm.
+#define ARITH_REG (ctx->R[reg_num & ctx->v6])
+      u32 arith_imm = (ctx->v6) ? (len_field ? imm : OTHER_REG) : (reg_num ? ctx->R[1] : imm);
+      s32 arith_signed_imm = (ctx->v6) ? (len_field ? signed_imm : (s32)OTHER_REG) : (reg_num ? (s32)ctx->R[1] : signed_imm);
+
       u32 pktcopy_src_offset = 0;  // used for various pktdatacopy opcodes
       switch (opcode) {
           case PASSDROP_OPCODE: {  // APFv6+
@@ -268,22 +273,25 @@ static int do_apf_run(apf_context* ctx) {
               }
               break;
           }
-          case ADD_OPCODE: ctx->R[0] += reg_num ? ctx->R[1] : imm; break;
-          case MUL_OPCODE: ctx->R[0] *= reg_num ? ctx->R[1] : imm; break;
-          case AND_OPCODE: ctx->R[0] &= reg_num ? ctx->R[1] : imm; break;
-          case OR_OPCODE:  ctx->R[0] |= reg_num ? ctx->R[1] : imm; break;
-          case DIV_OPCODE: {
-              const u32 div_operand = reg_num ? ctx->R[1] : imm;
+          // There is a difference in APFv4 and APFv6 arithmetic behaviour!
+          // APFv4:  R[0] op= Rbit ? R[1] : imm;  (and it thus doesn't make sense to have R=1 && len_field>0)
+          // APFv6+: REG  op= len_field ? imm : OTHER_REG;  (note: this is *DIFFERENT* with R=1 len_field==0)
+          // Furthermore APFv4 uses unsigned imm (except SH), while APFv6 uses signed_imm for ADD/AND/SH.
+          case ADD_OPCODE: ARITH_REG += (ctx->v6) ? (u32)arith_signed_imm : arith_imm; break;
+          case MUL_OPCODE: ARITH_REG *= arith_imm; break;
+          case AND_OPCODE: ARITH_REG &= (ctx->v6) ? (u32)arith_signed_imm : arith_imm; break;
+          case OR_OPCODE:  ARITH_REG |= arith_imm; break;
+          case DIV_OPCODE: {  // see above comment!
+              const u32 div_operand = arith_imm;
               ASSERT_RETURN(div_operand);
-              ctx->R[0] /= div_operand;
+              ARITH_REG /= div_operand;
               break;
           }
-          case SH_OPCODE: {
-              const s32 shift_val = reg_num ? (s32)ctx->R[1] : signed_imm;
-              if (shift_val > 0)
-                  ctx->R[0] <<= shift_val;
+          case SH_OPCODE: {  // see above comment!
+              if (arith_signed_imm >= 0)
+                  ARITH_REG <<= arith_signed_imm;
               else
-                  ctx->R[0] >>= -shift_val;
+                  ARITH_REG >>= -arith_signed_imm;
               break;
           }
           case LI_OPCODE:
