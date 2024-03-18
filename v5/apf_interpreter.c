@@ -24,7 +24,7 @@
 #define FALLTHROUGH
 #endif
 
-typedef enum { false, true } bool;
+typedef enum { False, True } Boolean;
 
 /* Begin include of apf_defs.h */
 typedef int8_t s8;
@@ -38,8 +38,8 @@ typedef uint32_t u32;
 typedef enum {
   error_program = -2,
   error_packet = -1,
-  nomatch = false,
-  match = true,
+  nomatch = False,
+  match = True,
 } match_result_type;
 
 #define ETH_P_IP	0x0800
@@ -66,6 +66,8 @@ typedef enum {
 #define IPV6_HLEN	40
 #define TCP_HLEN	20
 #define UDP_HLEN	8
+
+#define FUNC(x) x; x
 /* End include of apf_defs.h */
 /* Begin include of apf.h */
 /*
@@ -387,13 +389,13 @@ static u8 uppercase(u8 c) {
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_single_name(const u8* needle,
+FUNC(match_result_type match_single_name(const u8* needle,
                                     const u8* const needle_bound,
                                     const u8* const udp,
                                     const u32 udp_len,
-                                    u32* const ofs) {
+                                    u32* const ofs)) {
     u32 first_unread_offset = *ofs;
-    bool is_qname_match = true;
+    Boolean is_qname_match = True;
     int lvl;
 
     /* DNS names are <= 255 characters including terminating 0, since >= 1 char + '.' per level => max. 127 levels */
@@ -422,11 +424,11 @@ match_result_type match_single_name(const u8* needle,
                         is_qname_match &= (uppercase(w) == *needle++);
                     }
                 } else {
-                    if (len != 0xFF) is_qname_match = false;
+                    if (len != 0xFF) is_qname_match = False;
                     *ofs += label_size;
                 }
             } else {
-                is_qname_match = false;
+                is_qname_match = False;
                 *ofs += label_size;
             }
         } else { /* reached the end of the name */
@@ -450,11 +452,11 @@ match_result_type match_single_name(const u8* needle,
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_names(const u8* needles,
+FUNC(match_result_type match_names(const u8* needles,
                               const u8* const needle_bound,
                               const u8* const udp,
                               const u32 udp_len,
-                              const int question_type) {
+                              const int question_type)) {
     if (udp_len < 12) return error_packet;  /* lack of dns header */
 
     /* dns header: be16 tid, flags, num_{questions,answers,authority,additional} */
@@ -462,7 +464,7 @@ match_result_type match_names(const u8* needles,
     u32 num_answers = read_be16(udp + 6) + read_be16(udp + 8) + read_be16(udp + 10);
 
     /* loop until we hit final needle, which is a null byte */
-    while (true) {
+    while (True) {
         if (needles >= needle_bound) return error_program;
         if (!*needles) return nomatch;  /* we've run out of needles without finding a match */
         u32 ofs = 12;  /* dns header is 12 bytes */
@@ -504,7 +506,7 @@ match_result_type match_names(const u8* needles,
  * Calculate big endian 16-bit sum of a buffer (max 128kB),
  * then fold and negate it, producing a 16-bit result in [0..FFFE].
  */
-u16 calc_csum(u32 sum, const u8* const buf, const s32 len) {
+FUNC(u16 calc_csum(u32 sum, const u8* const buf, const s32 len)) {
     s32 i;
     for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
 
@@ -542,12 +544,12 @@ static u16 fix_udp_csum(u16 csum) {
  *                     calculation (until end of pkt specified by len)
  * @param csum_ofs - offset from beginning of pkt to store L4 checksum
  *                   255 means do not calculate/store L4 checksum
- * @param udp - true iff we should generate a UDP style L4 checksum (0 -> 0xFFFF)
+ * @param udp - True iff we should generate a UDP style L4 checksum (0 -> 0xFFFF)
  *
  * @return 6-bit DSCP value [0..63], garbage on parse error.
  */
-int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
-  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp) {
+FUNC(int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
+  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const Boolean udp)) {
     if (csum_ofs < 255) {
         /* note that calc_csum() treats negative lengths as zero */
         u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
@@ -590,7 +592,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240214;
+    return 20240226;
 }
 
 typedef struct {
@@ -609,7 +611,7 @@ typedef struct {
     memory_type mem;   /* Memory slot values. */
 } apf_context;
 
-int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp) {
+FUNC(int do_transmit_buffer(apf_context* ctx, u32 pkt_len, u8 dscp)) {
     int ret = apf_transmit_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;
@@ -751,7 +753,7 @@ static int do_apf_run(apf_context* ctx) {
                 /* First invocation of APFv6 jmpdata instruction */
                 counter[-1] = 0x12345678;  /* endianness marker */
                 counter[-2]++;  /* total packets ++ */
-                ctx->v6 = (u8)true;
+                ctx->v6 = (u8)True;
               }
               /* This can jump backwards. Infinite looping prevented by instructions_remaining. */
               ctx->pc += imm;
@@ -878,7 +880,7 @@ static int do_apf_run(apf_context* ctx) {
                     }
                     int dscp = csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
                                                     partial_csum, csum_start, csum_ofs,
-                                                    (bool)reg_num);
+                                                    (Boolean)reg_num);
                     int ret = do_transmit_buffer(ctx, pkt_len, dscp);
                     if (ret) { counter[-4]++; return PASS_PACKET; } /* transmit failure */
                     break;
@@ -934,7 +936,7 @@ static int do_apf_run(apf_context* ctx) {
                         ctx->pc++;
                     }
                     ctx->pc += 2;  /* skip the final double 0 needle end */
-                    /* relies on reg_num in {0,1} and match_rst being {false=0, true=1} */
+                    /* relies on reg_num in {0,1} and match_rst being {False=0, True=1} */
                     if (!(reg_num ^ (u32)match_rst)) ctx->pc += jump_offs;
                     break;
                   }

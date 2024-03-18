@@ -25,6 +25,7 @@ cc_defaults {
         "-Wall",
         "-Werror",
         "-Werror=implicit-fallthrough",
+        "-Werror=missing-prototypes",
         "-Werror=strict-prototypes",
         "-Wnullable-to-nonnull-conversion",
         "-Wsign-compare",

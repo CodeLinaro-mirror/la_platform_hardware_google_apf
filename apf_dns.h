@@ -12,11 +12,11 @@
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_single_name(const u8* needle,
+FUNC(match_result_type match_single_name(const u8* needle,
                                     const u8* const needle_bound,
                                     const u8* const udp,
                                     const u32 udp_len,
-                                    u32* const ofs) {
+                                    u32* const ofs)) {
     u32 first_unread_offset = *ofs;
     bool is_qname_match = true;
     int lvl;
@@ -75,11 +75,11 @@ match_result_type match_single_name(const u8* needle,
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
-match_result_type match_names(const u8* needles,
+FUNC(match_result_type match_names(const u8* needles,
                               const u8* const needle_bound,
                               const u8* const udp,
                               const u32 udp_len,
-                              const int question_type) {
+                              const int question_type)) {
     if (udp_len < 12) return error_packet;  /* lack of dns header */
 
     /* dns header: be16 tid, flags, num_{questions,answers,authority,additional} */
