@@ -14,15 +14,13 @@
  * limitations under the License.
  */
 
-#include <stdint.h>
-
 #ifndef TEST_BUF_ALLOCATOR
 #define TEST_BUF_ALLOCATOR
 
-#define APF_TX_BUFFER_SIZE 1500
+#include <stdint.h>
+#include <linux/if_ether.h>
 
-extern uint8_t apf_test_buffer[APF_TX_BUFFER_SIZE];
-extern uint8_t apf_test_tx_packet[APF_TX_BUFFER_SIZE];
+extern uint8_t apf_test_buffer[1514];
 extern uint32_t apf_test_tx_packet_len;
 extern uint8_t apf_test_tx_dscp;
 

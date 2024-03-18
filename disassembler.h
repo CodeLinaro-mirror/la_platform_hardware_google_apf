@@ -23,20 +23,17 @@ extern "C" {
 #endif
 
 /**
- * Disassembles a APF program into a human-readable format.
+ * Disassembles an APF program into a human-readable format.
  *
  * @param program the program bytecode.
  * @param program_len the length of the program bytecode.
- * @param pc The program counter which point to the current instruction.
- * @param output_buffer A pointer to a buffer where the disassembled
- *                      instruction will be stored.
- * @param output_buffer_len the length of the output buffer.
+ * @param ptr2pc pointer to the program counter which points to the current instruction.
+ *           After function call, the program counter will be updated to point to the
+ *           next instruction.
  *
- * @return the program counter which point to the next instruction.
+ * @return pointer to static buffer which contains human readable text.
  */
-uint32_t apf_disassemble(const uint8_t* program, uint32_t program_len,
-                         uint32_t pc, char* output_buffer,
-                         int output_buffer_len);
+const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* ptr2pc);
 
 #ifdef __cplusplus
 }

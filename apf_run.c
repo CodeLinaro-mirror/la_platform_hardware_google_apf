@@ -162,7 +162,7 @@ void maybe_print_tracing_header() {
 
 void print_transmitted_packet() {
     printf("transmitted packet: ");
-    print_hex(apf_test_tx_packet, (int) apf_test_tx_packet_len);
+    print_hex(apf_test_buffer, (int) apf_test_tx_packet_len);
     printf("\n");
 }
 
@@ -176,7 +176,7 @@ void packet_handler(int use_apf_v6_interpreter, uint8_t* program,
 
     int ret;
     if (use_apf_v6_interpreter) {
-        ret = apf_run(NULL, program, program_len, ram_len, packet, packet_len,
+        ret = apf_run(NULL, (uint32_t*)program, program_len, ram_len, packet, packet_len,
                             filter_age);
     } else {
         ret = accept_packet(program, program_len, ram_len, packet, packet_len,
@@ -187,7 +187,6 @@ void packet_handler(int use_apf_v6_interpreter, uint8_t* program,
     free(packet);
 }
 
-static char output_buffer[512];
 
 void apf_trace_hook(uint32_t pc, const uint32_t* regs, const uint8_t* program, uint32_t program_len,
                     const uint8_t* packet __unused, uint32_t packet_len __unused,
@@ -195,9 +194,7 @@ void apf_trace_hook(uint32_t pc, const uint32_t* regs, const uint8_t* program, u
     if (!tracing_enabled) return;
 
     printf("%8" PRIx32 " %8" PRIx32 " ", regs[0], regs[1]);
-    apf_disassemble(program, program_len, pc, output_buffer,
-                    sizeof(output_buffer) / sizeof(output_buffer[0]));
-    printf("%s\n", output_buffer);
+    printf("%s\n", apf_disassemble(program, program_len, &pc));
 }
 
 // Process pcap file through APF filter and generate output files
@@ -234,7 +231,7 @@ void file_handler(int use_apf_v6_interpreter, uint8_t* program,
 
         int result;
         if (use_apf_v6_interpreter) {
-            result = apf_run(NULL, program, program_len, ram_len, apf_packet,
+            result = apf_run(NULL, (uint32_t*)program, program_len, ram_len, apf_packet,
                              apf_header.len, filter_age);
         } else {
             result = accept_packet(program, program_len, ram_len, apf_packet,

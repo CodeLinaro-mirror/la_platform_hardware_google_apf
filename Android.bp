@@ -1,6 +1,7 @@
 // Copyright 2016 The Android Open Source Project
 
 package {
+    default_team: "trendy_team_fwk_core_networking",
     default_applicable_licenses: ["hardware_google_apf_license"],
 }
 
@@ -69,7 +70,7 @@ cc_binary_host {
         "apf_interpreter.c",
         "disassembler.c",
         "v5/apf_interpreter.c",
-        "v5/test_buf_allocator.c"
+        "v5/test_buf_allocator.c",
     ],
     cflags: [
         "-DAPF_TRACE_HOOK=apf_trace_hook",
@@ -102,4 +103,28 @@ sh_test_host {
     test_options: {
         unit_test: true,
     },
+}
+
+cc_test_host {
+    name: "apf_checksum_test",
+    srcs: [
+        "apf_checksum_test.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wno-unused-function",
+    ],
+    stl: "c++_static",
+}
+
+cc_test_host {
+    name: "apf_dns_test",
+    srcs: [
+        "apf_dns_test.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wno-unused-function",
+    ],
+    stl: "c++_static",
 }
