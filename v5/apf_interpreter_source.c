@@ -61,7 +61,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240312;
+    return 20240313;
 }
 
 typedef struct {
@@ -236,13 +236,14 @@ static int do_apf_run(apf_context* ctx) {
           case JNE_OPCODE:
           case JGT_OPCODE:
           case JLT_OPCODE:
-          case JSET_OPCODE:
-          case JBSMATCH_OPCODE: {
+          case JSET_OPCODE: {
+              // with len_field == 0, we have imm == 0 and thus a jmp +0, ie. a no-op
+              if (len_field == 0) break;
               // Load second immediate field.
               u32 cmp_imm = 0;
               if (reg_num == 1) {
                   cmp_imm = ctx->R[1];
-              } else if (len_field != 0) {
+              } else {
                   u32 cmp_imm_len = 1 << (len_field - 1);
                   cmp_imm = decode_imm(ctx, cmp_imm_len); // 2nd imm, at worst 8 bytes past prog_len
               }
@@ -252,25 +253,31 @@ static int do_apf_run(apf_context* ctx) {
                   case JGT_OPCODE:  if (ctx->R[0] >  cmp_imm) ctx->pc += imm; break;
                   case JLT_OPCODE:  if (ctx->R[0] <  cmp_imm) ctx->pc += imm; break;
                   case JSET_OPCODE: if (ctx->R[0] &  cmp_imm) ctx->pc += imm; break;
-                  case JBSMATCH_OPCODE: {
-                      // cmp_imm is size in bytes of data to compare.
-                      // pc is offset of program bytes to compare.
-                      // imm is jump target offset.
-                      // REG is offset of packet bytes to compare.
-                      if (len_field > 2) return PASS_PACKET; // guarantees cmp_imm <= 0xFFFF
-                      // pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap
-                      if (!IN_RAM_BOUNDS(ctx->pc + cmp_imm - 1)) return PASS_PACKET;
-                      ASSERT_IN_PACKET_BOUNDS(REG);
-                      const u32 last_packet_offs = REG + cmp_imm - 1;
-                      ASSERT_RETURN(last_packet_offs >= REG);
-                      ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                      if (memcmp(ctx->program + ctx->pc, ctx->packet + REG, cmp_imm))
-                          ctx->pc += imm;
-                      // skip past comparison bytes
-                      ctx->pc += cmp_imm;
-                      break;
-                  }
               }
+              break;
+          }
+          case JBSMATCH_OPCODE: {
+              // with len_field == 0, we have imm == cmp_imm == 0 and thus a jmp +0, ie. a no-op
+              if (len_field == 0) break;
+              // Load second immediate field.
+              u32 cmp_imm_len = 1 << (len_field - 1);
+              u32 cmp_imm = decode_imm(ctx, cmp_imm_len); // 2nd imm, at worst 4 bytes past prog_len
+              // cmp_imm is size in bytes of data to compare.
+              // pc is offset of program bytes to compare.
+              // imm is jump target offset.
+              // REG is offset of packet bytes to compare.
+              if (cmp_imm > 0xFFFF) return PASS_PACKET;
+              bool do_jump = !reg_num;
+              // pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap
+              if (!IN_RAM_BOUNDS(ctx->pc + cmp_imm - 1)) return PASS_PACKET;
+              ASSERT_IN_PACKET_BOUNDS(REG);
+              const u32 last_packet_offs = REG + cmp_imm - 1;
+              ASSERT_RETURN(last_packet_offs >= REG);
+              ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+              do_jump ^= !memcmp(ctx->program + ctx->pc, ctx->packet + REG, cmp_imm);
+              // skip past comparison bytes
+              ctx->pc += cmp_imm;
+              if (do_jump) ctx->pc += imm;
               break;
           }
           // There is a difference in APFv4 and APFv6 arithmetic behaviour!
