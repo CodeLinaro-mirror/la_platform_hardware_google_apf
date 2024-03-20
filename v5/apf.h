@@ -188,6 +188,7 @@ typedef union {
                            // NOTE: Only APFv6+ implements R=1 'jbseq' version
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
 #define LDDW_OPCODE 22  // Load 4 bytes from data address (register + signed imm): "lddw R0, [5+R1]"
+                        // LDDW/STDW in APFv6+ *mode* load/store from counter specified in imm.
 #define STDW_OPCODE 23  // Store 4 bytes to data address (register + signed imm): "stdw R0, [5+R1]"
 
 /* Write 1, 2 or 4 byte immediate to the output buffer and auto-increment the output buffer pointer.
@@ -281,6 +282,17 @@ typedef union {
  */
 #define JDNSAMATCH_EXT_OPCODE 44
 #define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+/* Jump if register is [not] one of the list of values
+ * R bit - specifies the register (R0/R1) to test
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(u8): top 5 bits - number of following u8/be16/be32 values - 1
+ *        middle 2 bits - 1..4 length of immediates
+ *        bottom 1 bit  - =0 jmp if in set, =1 if not in set
+ * imm4(imm3 * 1/2/3/4 bytes): the *UNIQUE* values to compare against
+ */
+#define JONEOF_EXT_OPCODE 47
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
