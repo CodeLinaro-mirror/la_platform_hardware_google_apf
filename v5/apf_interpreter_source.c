@@ -61,7 +61,7 @@ extern void APF_TRACE_HOOK(u32 pc, const u32* regs, const u8* program,
 #define ENFORCE_UNSIGNED(c) ((c)==(u32)(c))
 
 u32 apf_version(void) {
-    return 20240312;
+    return 20240315;
 }
 
 typedef struct {
@@ -171,6 +171,11 @@ static int do_apf_run(apf_context* ctx) {
           signed_imm >>= (4 - imm_len) * 8;
       }
 
+      // See comment at ADD_OPCODE for the reason for ARITH_REG/arith_imm/arith_signed_imm.
+#define ARITH_REG (ctx->R[reg_num & ctx->v6])
+      u32 arith_imm = (ctx->v6) ? (len_field ? imm : OTHER_REG) : (reg_num ? ctx->R[1] : imm);
+      s32 arith_signed_imm = (ctx->v6) ? (len_field ? signed_imm : (s32)OTHER_REG) : (reg_num ? (s32)ctx->R[1] : signed_imm);
+
       u32 pktcopy_src_offset = 0;  // used for various pktdatacopy opcodes
       switch (opcode) {
           case PASSDROP_OPCODE: {  // APFv6+
@@ -231,13 +236,14 @@ static int do_apf_run(apf_context* ctx) {
           case JNE_OPCODE:
           case JGT_OPCODE:
           case JLT_OPCODE:
-          case JSET_OPCODE:
-          case JBSMATCH_OPCODE: {
+          case JSET_OPCODE: {
+              // with len_field == 0, we have imm == 0 and thus a jmp +0, ie. a no-op
+              if (len_field == 0) break;
               // Load second immediate field.
               u32 cmp_imm = 0;
               if (reg_num == 1) {
                   cmp_imm = ctx->R[1];
-              } else if (len_field != 0) {
+              } else {
                   u32 cmp_imm_len = 1 << (len_field - 1);
                   cmp_imm = decode_imm(ctx, cmp_imm_len); // 2nd imm, at worst 8 bytes past prog_len
               }
@@ -247,43 +253,52 @@ static int do_apf_run(apf_context* ctx) {
                   case JGT_OPCODE:  if (ctx->R[0] >  cmp_imm) ctx->pc += imm; break;
                   case JLT_OPCODE:  if (ctx->R[0] <  cmp_imm) ctx->pc += imm; break;
                   case JSET_OPCODE: if (ctx->R[0] &  cmp_imm) ctx->pc += imm; break;
-                  case JBSMATCH_OPCODE: {
-                      // cmp_imm is size in bytes of data to compare.
-                      // pc is offset of program bytes to compare.
-                      // imm is jump target offset.
-                      // REG is offset of packet bytes to compare.
-                      if (len_field > 2) return PASS_PACKET; // guarantees cmp_imm <= 0xFFFF
-                      // pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap
-                      if (!IN_RAM_BOUNDS(ctx->pc + cmp_imm - 1)) return PASS_PACKET;
-                      ASSERT_IN_PACKET_BOUNDS(REG);
-                      const u32 last_packet_offs = REG + cmp_imm - 1;
-                      ASSERT_RETURN(last_packet_offs >= REG);
-                      ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
-                      if (memcmp(ctx->program + ctx->pc, ctx->packet + REG, cmp_imm))
-                          ctx->pc += imm;
-                      // skip past comparison bytes
-                      ctx->pc += cmp_imm;
-                      break;
-                  }
               }
               break;
           }
-          case ADD_OPCODE: ctx->R[0] += reg_num ? ctx->R[1] : imm; break;
-          case MUL_OPCODE: ctx->R[0] *= reg_num ? ctx->R[1] : imm; break;
-          case AND_OPCODE: ctx->R[0] &= reg_num ? ctx->R[1] : imm; break;
-          case OR_OPCODE:  ctx->R[0] |= reg_num ? ctx->R[1] : imm; break;
-          case DIV_OPCODE: {
-              const u32 div_operand = reg_num ? ctx->R[1] : imm;
-              ASSERT_RETURN(div_operand);
-              ctx->R[0] /= div_operand;
+          case JBSMATCH_OPCODE: {
+              // with len_field == 0, we have imm == cmp_imm == 0 and thus a jmp +0, ie. a no-op
+              if (len_field == 0) break;
+              // Load second immediate field.
+              u32 cmp_imm_len = 1 << (len_field - 1);
+              u32 cmp_imm = decode_imm(ctx, cmp_imm_len); // 2nd imm, at worst 8 bytes past prog_len
+              // cmp_imm is size in bytes of data to compare.
+              // pc is offset of program bytes to compare.
+              // imm is jump target offset.
+              // R0 is offset of packet bytes to compare.
+              if (cmp_imm > 0xFFFF) return PASS_PACKET;
+              bool do_jump = !reg_num;
+              // pc < program_len < ram_len < 2GiB, thus pc + cmp_imm cannot wrap
+              if (!IN_RAM_BOUNDS(ctx->pc + cmp_imm - 1)) return PASS_PACKET;
+              ASSERT_IN_PACKET_BOUNDS(ctx->R[0]);
+              const u32 last_packet_offs = ctx->R[0] + cmp_imm - 1;
+              ASSERT_RETURN(last_packet_offs >= ctx->R[0]);
+              ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+              do_jump ^= !memcmp(ctx->program + ctx->pc, ctx->packet + ctx->R[0], cmp_imm);
+              // skip past comparison bytes
+              ctx->pc += cmp_imm;
+              if (do_jump) ctx->pc += imm;
               break;
           }
-          case SH_OPCODE: {
-              const s32 shift_val = reg_num ? (s32)ctx->R[1] : signed_imm;
-              if (shift_val > 0)
-                  ctx->R[0] <<= shift_val;
+          // There is a difference in APFv4 and APFv6 arithmetic behaviour!
+          // APFv4:  R[0] op= Rbit ? R[1] : imm;  (and it thus doesn't make sense to have R=1 && len_field>0)
+          // APFv6+: REG  op= len_field ? imm : OTHER_REG;  (note: this is *DIFFERENT* with R=1 len_field==0)
+          // Furthermore APFv4 uses unsigned imm (except SH), while APFv6 uses signed_imm for ADD/AND/SH.
+          case ADD_OPCODE: ARITH_REG += (ctx->v6) ? (u32)arith_signed_imm : arith_imm; break;
+          case MUL_OPCODE: ARITH_REG *= arith_imm; break;
+          case AND_OPCODE: ARITH_REG &= (ctx->v6) ? (u32)arith_signed_imm : arith_imm; break;
+          case OR_OPCODE:  ARITH_REG |= arith_imm; break;
+          case DIV_OPCODE: {  // see above comment!
+              const u32 div_operand = arith_imm;
+              ASSERT_RETURN(div_operand);
+              ARITH_REG /= div_operand;
+              break;
+          }
+          case SH_OPCODE: {  // see above comment!
+              if (arith_signed_imm >= 0)
+                  ARITH_REG <<= arith_signed_imm;
               else
-                  ctx->R[0] >>= -shift_val;
+                  ARITH_REG >>= -arith_signed_imm;
               break;
           }
           case LI_OPCODE:
@@ -422,38 +437,59 @@ static int do_apf_run(apf_context* ctx) {
                     }
                     break;
                   }
+                  case JONEOF_EXT_OPCODE: {
+                    const u32 imm_len = 1 << (len_field - 1); // ext opcode len_field guaranteed > 0
+                    u32 jump_offs = decode_imm(ctx, imm_len); // 2nd imm, at worst 8 B past prog_len
+                    u8 imm3 = DECODE_U8();  // 3rd imm, at worst 9 bytes past prog_len
+                    bool jmp = imm3 & 1;  // =0 jmp on match, =1 jmp on no match
+                    u8 len = ((imm3 >> 1) & 3) + 1;  // size [1..4] in bytes of an element
+                    u8 cnt = (imm3 >> 3) + 1;  // number [1..32] of elements in set
+                    if (ctx->pc + cnt * len > ctx->program_len) return PASS_PACKET;
+                    while (cnt--) {
+                        u32 v = 0;
+                        int i;
+                        for (i = 0; i < len; ++i) v = (v << 8) | DECODE_U8();
+                        if (REG == v) jmp ^= true;
+                    }
+                    if (jmp) ctx->pc += jump_offs;
+                    return PASS_PACKET;
+                  }
                   default:  // Unknown extended opcode
                     return PASS_PACKET;  // Bail out
               }
               break;
-          case LDDW_OPCODE: {
-              u32 offs = OTHER_REG + (u32)signed_imm;
-              u32 size = 4;
-              u32 val = 0;
-              // Negative offsets wrap around the end of the address space.
-              // This allows us to efficiently access the end of the
-              // address space with one-byte immediates without using %=.
-              if (offs & 0x80000000) offs += ctx->ram_len;  // unsigned overflow intended
-              ASSERT_IN_DATA_BOUNDS(offs, size);
-              while (size--) val = (val << 8) | ctx->program[offs++];
-              REG = val;
-              break;
-          }
-          case STDW_OPCODE: {
-              u32 offs = OTHER_REG + (u32)signed_imm;
-              u32 size = 4;
-              u32 val = REG;
-              // Negative offsets wrap around the end of the address space.
-              // This allows us to efficiently access the end of the
-              // address space with one-byte immediates without using %=.
-              if (offs & 0x80000000) offs += ctx->ram_len;  // unsigned overflow intended
-              ASSERT_IN_DATA_BOUNDS(offs, size);
-              while (size--) {
-                  ctx->program[offs++] = (val >> 24);
-                  val <<= 8;
+          case LDDW_OPCODE:
+          case STDW_OPCODE:
+              if (ctx->v6) {
+                  if (!imm) return PASS_PACKET;
+                  if (imm > 0xFFFF) return PASS_PACKET;
+                  if (imm * 4 > ctx->ram_len) return PASS_PACKET;
+                  if (opcode == LDDW_OPCODE) {
+                     REG = counter[-(s32)imm];
+                  } else {
+                     counter[-(s32)imm] = REG;
+                  }
+              } else {
+                  u32 offs = OTHER_REG + (u32)signed_imm;
+                  // Negative offsets wrap around the end of the address space.
+                  // This allows us to efficiently access the end of the
+                  // address space with one-byte immediates without using %=.
+                  if (offs & 0x80000000) offs += ctx->ram_len;  // unsigned overflow intended
+                  u32 size = 4;
+                  ASSERT_IN_DATA_BOUNDS(offs, size);
+                  if (opcode == LDDW_OPCODE) {
+                      u32 val = 0;
+                      while (size--) val = (val << 8) | ctx->program[offs++];
+                      REG = val;
+                  } else {
+                      u32 val = REG;
+                      while (size--) {
+                          ctx->program[offs++] = (val >> 24);
+                          val <<= 8;
+                      }
+                  }
               }
               break;
-          }
           case WRITE_OPCODE: {
               ASSERT_RETURN(ctx->tx_buf);
               ASSERT_RETURN(len_field);
