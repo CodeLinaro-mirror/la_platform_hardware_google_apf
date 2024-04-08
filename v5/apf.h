@@ -93,7 +93,8 @@
  *    When the APF program begins execution, six of the sixteen memory slots
  *    are pre-filled by the interpreter with values that may be useful for
  *    programs:
- *      #0 to #8 are zero initialized.
+ *      #0 to #7 are zero initialized.
+ *      Slot #8  is initialized with apf version (on APF >4).
  *      Slot #9  this is slot #15 with greater resolution (1/16384ths of a second)
  *      Slot #10 starts at zero, implicitly used as tx buffer output pointer.
  *      Slot #11 contains the size (in bytes) of the APF program.
@@ -138,7 +139,8 @@
 
 typedef union {
   struct {
-    u32 pad[9];               // 0..8
+    u32 pad[8];               // 0..7
+    u32 apf_version;          // 8:  Initialized with apf_version()
     u32 filter_age_16384ths;  // 9:  Age since filter installed in 1/16384 seconds.
     u32 tx_buf_offset;        // 10: Offset in tx_buf where next byte will be written
     u32 program_size;         // 11: Size of program (in bytes)
@@ -183,8 +185,10 @@ typedef union {
 #define JLT_OPCODE 18   // Compare less than and branch, e.g. "jlt R0,5,label"
 #define JSET_OPCODE 19  // Compare any bits set and branch, e.g. "jset R0,5,label"
 #define JBSMATCH_OPCODE 20 // Compare byte sequence [R=0 not] equal, e.g. "jbsne R0,2,label,0x1122"
+                           // NOTE: Only APFv6+ implements R=1 'jbseq' version
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
 #define LDDW_OPCODE 22  // Load 4 bytes from data address (register + signed imm): "lddw R0, [5+R1]"
+                        // LDDW/STDW in APFv6+ *mode* load/store from counter specified in imm.
 #define STDW_OPCODE 23  // Store 4 bytes to data address (register + signed imm): "stdw R0, [5+R1]"
 
 /* Write 1, 2 or 4 byte immediate to the output buffer and auto-increment the output buffer pointer.
@@ -278,6 +282,17 @@ typedef union {
  */
 #define JDNSAMATCH_EXT_OPCODE 44
 #define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+/* Jump if register is [not] one of the list of values
+ * R bit - specifies the register (R0/R1) to test
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(u8): top 5 bits - number of following u8/be16/be32 values - 1
+ *        middle 2 bits - 1..4 length of immediates
+ *        bottom 1 bit  - =0 jmp if in set, =1 if not in set
+ * imm4(imm3 * 1/2/3/4 bytes): the *UNIQUE* values to compare against
+ */
+#define JONEOF_EXT_OPCODE 47
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536

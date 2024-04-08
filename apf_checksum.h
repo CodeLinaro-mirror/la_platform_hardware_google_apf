@@ -2,7 +2,7 @@
  * Calculate big endian 16-bit sum of a buffer (max 128kB),
  * then fold and negate it, producing a 16-bit result in [0..FFFE].
  */
-u16 calc_csum(u32 sum, const u8* const buf, const s32 len) {
+FUNC(u16 calc_csum(u32 sum, const u8* const buf, const s32 len)) {
     s32 i;
     for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
 
@@ -44,8 +44,8 @@ static u16 fix_udp_csum(u16 csum) {
  *
  * @return 6-bit DSCP value [0..63], garbage on parse error.
  */
-int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
-  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp) {
+FUNC(int csum_and_return_dscp(u8* const pkt, const s32 len, const u8 ip_ofs,
+  const u16 partial_csum, const u8 csum_start, const u8 csum_ofs, const bool udp)) {
     if (csum_ofs < 255) {
         // note that calc_csum() treats negative lengths as zero
         u32 csum = calc_csum(partial_csum, pkt + csum_start, len - csum_start);
