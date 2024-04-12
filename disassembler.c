@@ -32,6 +32,7 @@ typedef enum { false, true } bool;
 char print_buf[1024];
 char* buf_ptr;
 int buf_remain;
+bool v6_mode = false;
 
 __attribute__ ((format (printf, 1, 2) ))
 static void bprintf(const char* format, ...) {
@@ -138,7 +139,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 print_opcode("drop");
             }
             if (imm > 0) {
-                bprintf(" %d", imm);
+                bprintf("counter=%d", imm);
             }
             break;
         case LDB_OPCODE:
@@ -162,6 +163,7 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 PRINT_OPCODE();
                 print_jump_target(*ptr2pc + imm, program_len);
             } else {
+                v6_mode = true;
                 print_opcode("data");
                 bprintf("%d, ", imm);
                 uint32_t len = imm;
@@ -356,12 +358,20 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
         case LDDW_OPCODE:
         case STDW_OPCODE:
             PRINT_OPCODE();
-            if (signed_imm > 0) {
-                bprintf("r%u, [r%u+%d]", reg_num, reg_num ^ 1, signed_imm);
-            } else if (signed_imm < 0) {
-                bprintf("r%u, [r%u-%d]", reg_num, reg_num ^ 1, -signed_imm);
+            if (v6_mode) {
+                if (opcode == LDDW_OPCODE) {
+                    bprintf("r%u, counter=%d", reg_num, imm);
+                } else {
+                    bprintf("counter=%d, r%u", imm, reg_num);
+                }
             } else {
-                bprintf("r%u, [r%u]", reg_num, reg_num ^ 1);
+                if (signed_imm > 0) {
+                    bprintf("r%u, [r%u+%d]", reg_num, reg_num ^ 1, signed_imm);
+                } else if (signed_imm < 0) {
+                    bprintf("r%u, [r%u-%d]", reg_num, reg_num ^ 1, -signed_imm);
+                } else {
+                    bprintf("r%u, [r%u]", reg_num, reg_num ^ 1);
+                }
             }
             break;
         case WRITE_OPCODE: {
