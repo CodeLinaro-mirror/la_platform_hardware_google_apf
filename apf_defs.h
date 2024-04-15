@@ -10,7 +10,7 @@ typedef enum {
   error_program = -2,
   error_packet = -1,
   nomatch = false,
-  match = true,
+  match = true
 } match_result_type;
 
 #define ETH_P_IP	0x0800
