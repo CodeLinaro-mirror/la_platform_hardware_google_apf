@@ -39,7 +39,7 @@ typedef enum {
   error_program = -2,
   error_packet = -1,
   nomatch = False,
-  match = True,
+  match = True
 } match_result_type;
 
 #define ETH_P_IP	0x0800
@@ -405,7 +405,7 @@ FUNC(match_result_type apf_internal_match_single_name(const u8* needle,
             if (*ofs >= udp_len) return error_packet;
             u8 w = udp[(*ofs)++];
             if (*ofs > first_unread_offset) first_unread_offset = *ofs;
-            u32 new_ofs = (v - 0xC0) * 256 + w;
+            u32 new_ofs = (v - 0xC0) * 256u + w;
             if (new_ofs >= *ofs) return error_packet;  /* RFC 1035 4.1.4 allows only backward pointers */
             *ofs = new_ofs;
         } else if (v > 63) {
@@ -507,7 +507,7 @@ FUNC(match_result_type apf_internal_match_names(const u8* needles,
  */
 FUNC(u16 apf_internal_calc_csum(u32 sum, const u8* const buf, const s32 len)) {
     s32 i;
-    for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
+    for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1u : 256u);
 
     sum = (sum & 0xFFFF) + (sum >> 16);  /* max after this is 1FFFE */
     u16 csum = sum + (sum >> 16);
@@ -603,7 +603,6 @@ typedef struct {
     u32 ram_len;       /* Length of the entire apf program/data region */
     const u8* packet;  /* Pointer to input packet buffer */
     u32 packet_len;    /* Length of the input packet buffer */
-/*  u8 err_code;       // */
     u8 v6;             /* Set to 1 by first jmpdata (APFv6+) instruction */
     u32 pc;            /* Program counter. */
     u32 R[2];          /* Register values. */
@@ -1056,7 +1055,7 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
     /* This cannot wrap due to previous check. */
     if (program_len + 20 > ram_len) return PASS_PACKET;
 
-    apf_context apf_ctx = {};
+    apf_context apf_ctx = { 0 };
     apf_ctx.caller_ctx = ctx;
     apf_ctx.program = (u8*)program;
     apf_ctx.program_len = program_len;

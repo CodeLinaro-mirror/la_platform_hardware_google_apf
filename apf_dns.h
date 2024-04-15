@@ -29,7 +29,7 @@ FUNC(match_result_type match_single_name(const u8* needle,
             if (*ofs >= udp_len) return error_packet;
             u8 w = udp[(*ofs)++];
             if (*ofs > first_unread_offset) first_unread_offset = *ofs;
-            u32 new_ofs = (v - 0xC0) * 256 + w;
+            u32 new_ofs = (v - 0xC0) * 256u + w;
             if (new_ofs >= *ofs) return error_packet;  /* RFC 1035 4.1.4 allows only backward pointers */
             *ofs = new_ofs;
         } else if (v > 63) {

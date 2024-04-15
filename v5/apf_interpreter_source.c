@@ -73,7 +73,6 @@ typedef struct {
     u32 ram_len;       // Length of the entire apf program/data region
     const u8* packet;  // Pointer to input packet buffer
     u32 packet_len;    // Length of the input packet buffer
-//  u8 err_code;       //
     u8 v6;             // Set to 1 by first jmpdata (APFv6+) instruction
     u32 pc;            // Program counter.
     u32 R[2];          // Register values.
@@ -526,7 +525,7 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
     // This cannot wrap due to previous check.
     if (program_len + 20 > ram_len) return PASS_PACKET;
 
-    apf_context apf_ctx = {};
+    apf_context apf_ctx = { 0 };
     apf_ctx.caller_ctx = ctx;
     apf_ctx.program = (u8*)program;
     apf_ctx.program_len = program_len;
