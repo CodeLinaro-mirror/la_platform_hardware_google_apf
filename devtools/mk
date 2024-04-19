@@ -20,7 +20,6 @@ declare -ar FLAGS=(
   '-Wuninitialized'
   '-Os'
   '-fomit-frame-pointer'
-  '-Wno-declaration-after-statement'
 )
 
 arm-linux-gnueabi-gcc "${FLAGS[@]}" apf_interpreter.c -c -o apf_interpreter.arm.o
