@@ -23,13 +23,16 @@ FUNC(match_result_type match_single_name(const u8* needle,
 
     /* DNS names are <= 255 characters including terminating 0, since >= 1 char + '.' per level => max. 127 levels */
     for (lvl = 1; lvl <= 127; ++lvl) {
+        u8 v;
         if (*ofs >= udp_len) return error_packet;
-        u8 v = udp[(*ofs)++];
+        v = udp[(*ofs)++];
         if (v >= 0xC0) { /* RFC 1035 4.1.4 - handle message compression */
+            u8 w;
+            u32 new_ofs;
             if (*ofs >= udp_len) return error_packet;
-            u8 w = udp[(*ofs)++];
+            w = udp[(*ofs)++];
             if (*ofs > first_unread_offset) first_unread_offset = *ofs;
-            u32 new_ofs = (v - 0xC0) * 256u + w;
+            new_ofs = (v - 0xC0) * 256u + w;
             if (new_ofs >= *ofs) return error_packet;  /* RFC 1035 4.1.4 allows only backward pointers */
             *ofs = new_ofs;
         } else if (v > 63) {
@@ -80,24 +83,25 @@ FUNC(match_result_type match_names(const u8* needles,
                               const u8* const udp,
                               const u32 udp_len,
                               const int question_type)) {
+    u32 num_questions, num_answers;
     if (udp_len < 12) return error_packet;  /* lack of dns header */
 
     /* dns header: be16 tid, flags, num_{questions,answers,authority,additional} */
-    u32 num_questions = read_be16(udp + 4);
-    u32 num_answers = read_be16(udp + 6) + read_be16(udp + 8) + read_be16(udp + 10);
+    num_questions = read_be16(udp + 4);
+    num_answers = read_be16(udp + 6) + read_be16(udp + 8) + read_be16(udp + 10);
 
     /* loop until we hit final needle, which is a null byte */
     while (true) {
+        u32 i, ofs = 12;  /* dns header is 12 bytes */
         if (needles >= needle_bound) return error_program;
         if (!*needles) return nomatch;  /* we've run out of needles without finding a match */
-        u32 ofs = 12;  /* dns header is 12 bytes */
-        u32 i;
         /* match questions */
         for (i = 0; i < num_questions; ++i) {
             match_result_type m = match_single_name(needles, needle_bound, udp, udp_len, &ofs);
+            int qtype;
             if (m < nomatch) return m;
             if (ofs + 2 > udp_len) return error_packet;
-            int qtype = (int)read_be16(udp + ofs);
+            qtype = (int)read_be16(udp + ofs);
             ofs += 4; /* skip be16 qtype & qclass */
             if (question_type == -1) continue;
             if (m == nomatch) continue;
