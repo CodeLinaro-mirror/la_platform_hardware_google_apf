@@ -3,10 +3,12 @@
 #include <gtest/gtest.h>
 #include <linux/icmpv6.h>
 #include <linux/if_ether.h>
+#include <linux/in.h>
 #include <linux/in6.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/udp.h>
+#include <linux/igmp.h>
 #include "apf_defs.h"
 #include "apf_utils.h"
 #include "apf_checksum.h"
@@ -188,6 +190,50 @@ TEST(ApfChecksumTest, CalcICMPv6ChecksumWithHopByHopOption) {
     EXPECT_EQ(dscp, 0);
     // verify layer 4 checksum
     EXPECT_EQ(read_be16((uint8_t *)&ether_ipv6_hopopts_icmp6_pkt.pkt.icmp6hdr.icmp6_cksum), 0xf760);
+}
+
+TEST(ApfChecksumTest, CalcIGMPv2Checksum) {
+    // An IGMPv2 packet with ip checksum field set to 0
+    union packed {
+        uint8_t data[46];
+        struct packed {
+          struct ethhdr ethhdr;
+          struct iphdr iphdr;
+          uint8_t router_alert_option[4];
+          struct igmphdr igmphdr;
+        } pkt;
+    } ether_ipv4_igmpv2_pkt = {{
+        0x01, 0x00, 0x5e, 0x00, 0x00, 0xfb,
+        0xa2, 0x29, 0xae, 0xb3, 0x56, 0x6b,
+        0x08, 0x00, // end of ethernet header
+        0x46,
+        0x00,
+        0x00, 0x20,
+        0xf8, 0xf3,
+        0x00, 0x00,
+        0x01,
+        0x02,
+        0x00, 0x00,
+        0xc0, 0xa8, 0x01, 0xed,
+        0xe0, 0x00, 0x00, 0xfb, // end of ipv4 header without option
+        0x94, 0x04, 0x00, 0x00, // router alert option
+        0x16,
+        0x00,
+        0x09, 0x04,
+        0xe0, 0x00, 0x00, 0xfb // end of igmp payload
+    }};
+
+    // Set IPv4 checksum to 0x9404 + 0x0000 = 0x9404
+    ether_ipv4_igmpv2_pkt.pkt.iphdr.check = htons(0x9404);
+    uint8_t dscp = csum_and_return_dscp((uint8_t *)&ether_ipv4_igmpv2_pkt,
+                                        sizeof(ether_ipv4_igmpv2_pkt),
+                                        ETH_HLEN /* ip_ofs */, IPPROTO_IGMP /* partial_csum */,
+                                        0 /* csum_start */,
+                                        255 /* csum_ofs */,
+                                        false /* udp */);
+    EXPECT_EQ(dscp, 0);
+    // Verify IPv4 header checksum
+    EXPECT_EQ(read_be16((uint8_t *)&ether_ipv4_igmpv2_pkt.pkt.iphdr.check), 0x8853);
 }
 
 }  // namespace apf

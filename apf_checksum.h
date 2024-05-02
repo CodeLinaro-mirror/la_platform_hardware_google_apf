@@ -3,11 +3,12 @@
  * then fold and negate it, producing a 16-bit result in [0..FFFE].
  */
 FUNC(u16 calc_csum(u32 sum, const u8* const buf, const s32 len)) {
+    u16 csum;
     s32 i;
-    for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1 : 256);
+    for (i = 0; i < len; ++i) sum += buf[i] * ((i & 1) ? 1u : 256u);
 
     sum = (sum & 0xFFFF) + (sum >> 16);  /* max after this is 1FFFE */
-    u16 csum = sum + (sum >> 16);
+    csum = sum + (sum >> 16);
     return ~csum;  /* assuming sum > 0 on input, this is in [0..FFFE] */
 }
 

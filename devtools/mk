@@ -9,6 +9,7 @@ cd "${0%/*}"
 
 declare -ar FLAGS=(
   '-std=c89'
+  '-pedantic'
   '-Wall'
   '-Werror'
   '-Werror=implicit-fallthrough'
@@ -21,7 +22,7 @@ declare -ar FLAGS=(
   '-fomit-frame-pointer'
 )
 
-arm-linux-gnueabi-gcc "${FLAGS[@]}" -Wno-sign-conversion apf_interpreter.c -c -o apf_interpreter.arm.o
+arm-linux-gnueabi-gcc "${FLAGS[@]}" apf_interpreter.c -c -o apf_interpreter.arm.o
 clang -m32 "${FLAGS[@]}" -Wnullable-to-nonnull-conversion -Wthread-safety apf_interpreter.c -c -o apf_interpreter.x86.o
 size apf_interpreter.arm.o
 size apf_interpreter.x86.o
