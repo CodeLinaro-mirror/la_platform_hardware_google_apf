@@ -350,6 +350,32 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                     }
                     break;
                 }
+                case JONEOF_EXT_OPCODE: {
+                    const uint32_t imm_len = 1 << (len_field - 1);
+                    uint32_t jump_offs = DECODE_IMM(imm_len);
+                    uint8_t imm3 = DECODE_IMM(1);
+                    bool jmp = imm3 & 1;
+                    uint8_t len = ((imm3 >> 1) & 3) + 1;
+                    uint8_t cnt = (imm3 >> 3) + 2;
+                    if (jmp) {
+                        print_opcode("jnoneof");
+                    } else {
+                        print_opcode("joneof");
+                    }
+                    bprintf("r%d, ", reg_num);
+                    print_jump_target(*ptr2pc + jump_offs + cnt * len, program_len);
+                    bprintf(", { ");
+                    while (cnt--) {
+                        uint32_t v = DECODE_IMM(len);
+                        if (cnt) {
+                            bprintf("%d, ", v);
+                        } else {
+                            bprintf("%d ", v);
+                        }
+                    }
+                    bprintf("}");
+                    break;
+                }
                 default:
                     bprintf("unknown_ext %u", imm);
                     break;
