@@ -280,7 +280,7 @@ static int do_apf_run(apf_context* ctx) {
             u32 len = cmp_imm & 2047; // 0..2047
             u32 bytes = cnt * len;
             const u32 last_packet_offs = ctx->R[0] + len - 1;
-            bool do_jump = !reg_num;
+            bool matched = false;
             // bytes = cnt * len is size in bytes of data to compare.
             // pc is offset of program bytes to compare.
             // imm is jump target offset.
@@ -289,14 +289,15 @@ static int do_apf_run(apf_context* ctx) {
             // pc < program_len < ram_len < 2GiB, thus pc + bytes cannot wrap
             if (!IN_RAM_BOUNDS(ctx->pc + bytes - 1)) return EXCEPTION;
             ASSERT_IN_PACKET_BOUNDS(ctx->R[0]);
+            // Note: this will return EXCEPTION (due to wrap) if imm_len (ie. len) is 0
             ASSERT_RETURN(last_packet_offs >= ctx->R[0]);
             ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
             while (cnt--) {
-                do_jump ^= !memcmp(ctx->program + ctx->pc, ctx->packet + ctx->R[0], len);
+                matched |= !memcmp(ctx->program + ctx->pc, ctx->packet + ctx->R[0], len);
                 // skip past comparison bytes
                 ctx->pc += len;
             }
-            if (do_jump) ctx->pc += imm;
+            if (matched ^ !reg_num) ctx->pc += imm;
             break;
           }
           // There is a difference in APFv4 and APFv6 arithmetic behaviour!
@@ -538,9 +539,9 @@ static int do_apf_run(apf_context* ctx) {
     return EXCEPTION;
 }
 
-int apf_run(void* ctx, u32* const program, const u32 program_len,
-            const u32 ram_len, const u8* const packet,
-            const u32 packet_len, const u32 filter_age_16384ths) {
+static int apf_runner(void* ctx, u32* const program, const u32 program_len,
+                      const u32 ram_len, const u8* const packet,
+                      const u32 packet_len, const u32 filter_age_16384ths) {
     // Due to direct 32-bit read/write access to counters at end of ram
     // APFv6 interpreter requires program & ram_len to be 4 byte aligned.
     if (3 & (uintptr_t)program) return EXCEPTION;
@@ -550,10 +551,6 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
     // Similarly LDDW/STDW have special meaning for negative ram offsets.
     // We also don't want garbage like program_len == 0xFFFFFFFF
     if ((program_len | ram_len) >> 31) return EXCEPTION;
-
-    // Any valid ethernet packet should be at least ETH_HLEN long...
-    if (!packet) return EXCEPTION;
-    if (packet_len < ETH_HLEN) return EXCEPTION;
 
     {
         apf_context apf_ctx = { 0 };
@@ -591,4 +588,14 @@ int apf_run(void* ctx, u32* const program, const u32 program_len,
         }
         return ret;
     }
+}
+
+int apf_run(void* ctx, u32* const program, const u32 program_len,
+            const u32 ram_len, const u8* const packet,
+            const u32 packet_len, const u32 filter_age_16384ths) {
+    // Any valid ethernet packet should be at least ETH_HLEN long...
+    if (!packet) return EXCEPTION;
+    if (packet_len < ETH_HLEN) return EXCEPTION;
+
+    return apf_runner(ctx, program, program_len, ram_len, packet, packet_len, filter_age_16384ths);
 }
