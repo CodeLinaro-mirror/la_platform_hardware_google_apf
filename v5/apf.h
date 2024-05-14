@@ -185,7 +185,7 @@ typedef union {
 #define JLT_OPCODE 18   // Compare less than and branch, e.g. "jlt R0,5,label"
 #define JSET_OPCODE 19  // Compare any bits set and branch, e.g. "jset R0,5,label"
 #define JBSMATCH_OPCODE 20 // Compare byte sequence [R=0 not] equal, e.g. "jbsne R0,2,label,0x1122"
-                           // NOTE: Only APFv6+ implements R=1 'jbseq' version
+                           // NOTE: Only APFv6+ implements R=1 'jbseq' version and multi match
 #define EXT_OPCODE 21   // Immediate value is one of *_EXT_OPCODE
 #define LDDW_OPCODE 22  // Load 4 bytes from data address (register + signed imm): "lddw R0, [5+R1]"
                         // LDDW/STDW in APFv6+ *mode* load/store from counter specified in imm.
@@ -287,12 +287,18 @@ typedef union {
  * R bit - specifies the register (R0/R1) to test
  * imm1: Extended opcode
  * imm2: Jump label offset
- * imm3(u8): top 5 bits - number of following u8/be16/be32 values - 1
- *        middle 2 bits - 1..4 length of immediates
+ * imm3(u8): top 5 bits - number 'n' of following u8/be16/be32 values - 2
+ *        middle 2 bits - 1..4 length of immediates - 1
  *        bottom 1 bit  - =0 jmp if in set, =1 if not in set
- * imm4(imm3 * 1/2/3/4 bytes): the *UNIQUE* values to compare against
+ * imm4(n * 1/2/3/4 bytes): the *UNIQUE* values to compare against
  */
 #define JONEOF_EXT_OPCODE 47
+
+/* Specify length of exception buffer, which is populated on abnormal program termination.
+ * imm1: Extended opcode
+ * imm2(u16): Length of exception buffer (located *immediately* after the program itself)
+ */
+#define EXCEPTIONBUFFER_EXT_OPCODE 48
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
