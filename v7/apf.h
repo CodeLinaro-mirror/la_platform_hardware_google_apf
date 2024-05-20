@@ -210,6 +210,8 @@ typedef union {
  */
 #define PKTDATACOPY_OPCODE 25
 
+#define JNSET_OPCODE 26 // JSET with reverse condition (jump if no bits set)
+
 /* ---------------------------------------------------------------------------------------------- */
 
 // Extended opcodes.
