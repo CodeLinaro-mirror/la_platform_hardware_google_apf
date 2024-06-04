@@ -20,8 +20,8 @@
 
 typedef enum { false, true } bool;
 
-#include "v5/apf_defs.h"
-#include "v5/apf.h"
+#include "v7/apf_defs.h"
+#include "v7/apf.h"
 #include "disassembler.h"
 
 // If "c" is of a signed type, generate a compile warning that gets promoted to an error.
@@ -75,6 +75,7 @@ static const char* opcode_names [] = {
     [LDDW_OPCODE] = "lddw",
     [STDW_OPCODE] = "stdw",
     [WRITE_OPCODE] = "write",
+    [JNSET_OPCODE] = "jnset",
 };
 
 static void print_jump_target(uint32_t target, uint32_t program_len) {
@@ -174,7 +175,8 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
         case JNE_OPCODE:
         case JGT_OPCODE:
         case JLT_OPCODE:
-        case JSET_OPCODE: {
+        case JSET_OPCODE:
+        case JNSET_OPCODE: {
             PRINT_OPCODE();
             bprintf("r0, ");
             // Load second immediate field.
@@ -196,13 +198,26 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                 print_opcode("jbseq");
             }
             bprintf("r0, ");
-            uint32_t cmp_imm = DECODE_IMM(1 << (len_field - 1));
-            bprintf("0x%x, ", cmp_imm);
-            print_jump_target(*ptr2pc + imm + cmp_imm, program_len);
+            const uint32_t cmp_imm = DECODE_IMM(1 << (len_field - 1));
+            const uint32_t cnt = (cmp_imm >> 11) + 1; // 1+, up to 32 fits in u16
+            const uint32_t len = cmp_imm & 2047; // 0..2047
+            bprintf("0x%x, ", len);
+            print_jump_target(*ptr2pc + imm + cnt * len, program_len);
             bprintf(", ");
-            while (cmp_imm--) {
-                uint8_t byte = program[(*ptr2pc)++];
-                bprintf("%02x", byte);
+            if (cnt > 1) {
+                bprintf("{ ");
+            }
+            for (uint32_t i = 0; i < cnt; ++i) {
+                for (uint32_t j = 0; j < len; ++j) {
+                    uint8_t byte = program[(*ptr2pc)++];
+                    bprintf("%02x", byte);
+                }
+                if (i != cnt - 1) {
+                    bprintf(", ");
+                }
+            }
+            if (cnt > 1) {
+                bprintf(" }");
             }
             break;
         }
@@ -374,6 +389,12 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                         }
                     }
                     bprintf("}");
+                    break;
+                }
+                case EXCEPTIONBUFFER_EXT_OPCODE: {
+                    uint32_t buf_size = DECODE_IMM(2);
+                    print_opcode("debugbuf");
+                    bprintf("size=%d", buf_size);
                     break;
                 }
                 default:

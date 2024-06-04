@@ -69,8 +69,8 @@ cc_binary_host {
         "apf_run.c",
         "apf_interpreter.c",
         "disassembler.c",
-        "v5/apf_interpreter.c",
-        "v5/test_buf_allocator.c",
+        "v7/apf_interpreter.c",
+        "v7/test_buf_allocator.c",
     ],
     cflags: [
         "-DAPF_TRACE_HOOK=apf_trace_hook",

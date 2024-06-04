@@ -19,7 +19,7 @@ package {
 }
 
 cc_defaults {
-    name: "apfv5_defaults",
+    name: "apfv7_defaults",
 
     cflags: [
         "-Wall",
@@ -37,8 +37,8 @@ cc_defaults {
 }
 
 cc_library_static {
-    name: "libapf_v5",
-    defaults: ["apfv5_defaults"],
+    name: "libapf_v7",
+    defaults: ["apfv7_defaults"],
     srcs: [
         "apf_interpreter.c",
         "test_buf_allocator.c",
