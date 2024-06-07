@@ -365,13 +365,18 @@ int main(int argc, char* argv[]) {
     }
 
     // Combine the program and data into the unified APF buffer.
-    if (data) {
-        program = realloc(program, program_len + data_len);
-        memcpy(program + program_len, data, data_len);
-        free(data);
+    uint32_t ram_len = program_len + data_len;
+    if (use_apf_v6_interpreter) {
+       ram_len += 3;
+       ram_len &= ~3;
+       if (data_len < 20) ram_len += 20;
     }
 
-    uint32_t ram_len = program_len + data_len;
+    if (data) {
+        program = realloc(program, ram_len);
+        memcpy(program + ram_len - data_len, data, data_len);
+        free(data);
+    }
 
     if (filename)
         file_handler(use_apf_v6_interpreter, program, program_len, ram_len,
@@ -382,11 +387,11 @@ int main(int argc, char* argv[]) {
 
     if (data_len) {
         printf("Data: ");
-        print_hex(program + program_len, data_len);
+        print_hex(program + ram_len - data_len, data_len);
         printf("\n");
         if (print_counter_enabled) {
           printf("APF packet counters: \n");
-          print_counter(program + program_len, data_len);
+          print_counter(program + ram_len - data_len, data_len);
         }
     }
 
