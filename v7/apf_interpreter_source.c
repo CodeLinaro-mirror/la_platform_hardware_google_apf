@@ -243,6 +243,7 @@ static int do_apf_run(apf_context* ctx) {
                 // Catch overflow/wrap-around.
                 ASSERT_RETURN(end_offs >= offs);
                 ASSERT_IN_PACKET_BOUNDS(end_offs);
+                // load_size underflow on final iteration not an issue as not used after loop.
                 while (load_size--) val = (val << 8) | read_packet_u8(ctx, offs++);
                 REG = val;
             }
@@ -300,6 +301,7 @@ static int do_apf_run(apf_context* ctx) {
             // Note: this will return EXCEPTION (due to wrap) if imm_len (ie. len) is 0
             ASSERT_RETURN(last_packet_offs >= ctx->R[0]);
             ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+            // cnt underflow on final iteration not an issue as not used after loop.
             while (cnt--) {
                 matched |= !memcmp(ctx->program + ctx->pc, ctx->packet + ctx->R[0], len);
                 // skip past comparison bytes
@@ -476,6 +478,7 @@ static int do_apf_run(apf_context* ctx) {
                 u8 len = ((imm3 >> 1) & 3) + 1;  // size [1..4] in bytes of an element
                 u8 cnt = (imm3 >> 3) + 2;  // number [2..33] of elements in set
                 if (ctx->pc + cnt * len > ctx->program_len) return EXCEPTION;
+                // cnt underflow on final iteration not an issue as not used after loop.
                 while (cnt--) {
                     u32 v = 0;
                     int i;
@@ -514,10 +517,12 @@ static int do_apf_run(apf_context* ctx) {
                 ASSERT_IN_DATA_BOUNDS(offs, size);
                 if (opcode == LDDW_OPCODE) {
                     u32 val = 0;
+                    // size underflow on final iteration not an issue as not used after loop.
                     while (size--) val = (val << 8) | ctx->program[offs++];
                     REG = val;
                 } else {
                     u32 val = REG;
+                    // size underflow on final iteration not an issue as not used after loop.
                     while (size--) {
                         ctx->program[offs++] = (val >> 24);
                         val <<= 8;
@@ -543,6 +548,7 @@ static int do_apf_run(apf_context* ctx) {
             return EXCEPTION;  // Bail out
         }
       }
+    // instructions_remaining underflow on final iteration not an issue as not used after loop.
     } while (instructions_remaining--);
     return EXCEPTION;
 }
