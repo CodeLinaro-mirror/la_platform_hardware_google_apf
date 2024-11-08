@@ -14,11 +14,10 @@
  * limitations under the License.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdarg.h>
-
-typedef enum { false, true } bool;
 
 #include "v7/apf_defs.h"
 #include "v7/apf.h"
