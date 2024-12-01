@@ -20,8 +20,16 @@
 #include <stdint.h>
 #include <linux/if_ether.h>
 
-extern uint8_t apf_test_buffer[1514];
-extern uint32_t apf_test_tx_packet_len;
+#define BUFFER_SIZE 1514
+
+typedef struct packet_buffer {
+    uint8_t data[BUFFER_SIZE];
+    uint8_t len;
+    struct packet_buffer *next;
+} packet_buffer;
+
+extern packet_buffer *head;
+extern packet_buffer *tail;
 extern uint8_t apf_test_tx_dscp;
 
 #endif  // TEST_BUF_ALLOCATOR
