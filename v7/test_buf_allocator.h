@@ -24,7 +24,7 @@
 
 typedef struct packet_buffer {
     uint8_t data[BUFFER_SIZE];
-    uint8_t len;
+    uint32_t len;
     struct packet_buffer *next;
 } packet_buffer;
 
