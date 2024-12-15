@@ -14,37 +14,65 @@
  * limitations under the License.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "apf_interpreter.h"
 #include "test_buf_allocator.h"
 
-uint8_t apf_test_buffer[sizeof(apf_test_buffer)];
-uint32_t apf_test_tx_packet_len;
+packet_buffer *head = NULL;
+packet_buffer *tail = NULL;
 uint8_t apf_test_tx_dscp;
 
 /**
  * Test implementation of apf_allocate_buffer()
  *
- * Clean up the apf_test_buffer and return the pointer to beginning of the buffer region.
+ * This is a reference apf_allocate_buffer() implementation for testing purpose.
+ * It supports being called multiple times for each apf_run().
+ * Allocate a new buffer and attach next to the current buffer, then move the current to it.
+ * Return the pointer to beginning of the allocated buffer region.
  */
 uint8_t* apf_allocate_buffer(__attribute__ ((unused)) void* ctx, uint32_t size) {
-  if (size > sizeof(apf_test_buffer)) {
+  if (size > BUFFER_SIZE) {
     return NULL;
   }
-  return apf_test_buffer;
+
+  packet_buffer* ptr = (packet_buffer *) malloc(sizeof(packet_buffer));
+  if (!ptr) {
+    fprintf(stderr, "failed to allocate buffer!\n");
+    return NULL;
+  }
+
+  memset(ptr->data, 0xff, sizeof(ptr->data));
+  ptr->next = NULL;
+  ptr->len = 0;
+
+  if (!head) {
+    // the first buffer allocated
+    head = ptr;
+    tail = head;
+  } else {
+    // append allocated buffer, and move current to the next
+    tail->next = ptr;
+    tail = tail->next;
+  }
+
+  return ptr->data;
 }
 
 /**
  * Test implementation of apf_transmit_buffer()
  *
- * Copy the content of allocated buffer to the apf_test_tx_packet region.
+ * This is a reference apf_transmit_buffer() implementation for testing purpose.
+ * Update the buffer length and dscp value from the transmit packet.
  */
 int apf_transmit_buffer(__attribute__((unused)) void* ctx, uint8_t* ptr,
                         uint32_t len, uint8_t dscp) {
   if (len && len < ETH_HLEN) return -1;
-  if (ptr != apf_test_buffer) return -1;
-  apf_test_tx_packet_len = len;
+  if (!tail || (ptr != tail->data)) return -1;
+
+  tail->len = len;
   apf_test_tx_dscp = dscp;
   return 0;
 }
