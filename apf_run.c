@@ -160,10 +160,15 @@ void maybe_print_tracing_header() {
 
 }
 
-void print_transmitted_packet() {
-    printf("transmitted packet: ");
-    print_hex(apf_test_buffer, (int) apf_test_tx_packet_len);
-    printf("\n");
+void print_all_transmitted_packets() {
+    printf("transmitted packet: \n");
+    packet_buffer* current = head;
+    while (current) {
+        printf("\t");
+        print_hex(current->data, (int) current->len);
+        printf("\n");
+        current = current->next;
+    }
 }
 
 // Process packet through APF filter
@@ -395,8 +400,8 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (use_apf_v6_interpreter && apf_test_tx_packet_len != 0) {
-        print_transmitted_packet();
+    if (use_apf_v6_interpreter && head != NULL) {
+        print_all_transmitted_packets();
     }
 
     free(program);
