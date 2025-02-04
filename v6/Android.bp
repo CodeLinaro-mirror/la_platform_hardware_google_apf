@@ -1,5 +1,5 @@
 //
-// Copyright (C) 2023 The Android Open Source Project
+// Copyright (C) 2025 The Android Open Source Project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ package {
 }
 
 cc_defaults {
-    name: "apfv7_defaults",
+    name: "apfv6_defaults",
 
     cflags: [
         "-Wall",
@@ -37,8 +37,8 @@ cc_defaults {
 }
 
 cc_library_static {
-    name: "libapf_v7",
-    defaults: ["apfv7_defaults"],
+    name: "libapf_v6",
+    defaults: ["apfv6_defaults"],
     static_libs: [
         "libapfbuf",
     ],
@@ -46,30 +46,4 @@ cc_library_static {
         "apf_interpreter.c",
     ],
     sdk_version: "24",
-}
-
-sh_test_host {
-    name: "apf_assemble_test",
-    src: "apf_interpreter_assemble.sh",
-    filename: "apf_assemble_test.sh",
-    test_config: "apf_assemble_test.xml",
-    data: [
-        // the sources:
-        "apf_*.h",
-        "apf.h",
-        "apf_interpreter_source.c",
-        // the assembled output:
-        "apf_interpreter.c",
-    ],
-    target: {
-        darwin: {
-            enabled: false,
-        },
-        windows: {
-            enabled: false,
-        },
-    },
-    test_options: {
-        unit_test: true,
-    },
 }

@@ -50,6 +50,15 @@ cc_library_static {
     sdk_version: "24",
 }
 
+cc_library_static {
+    name: "libapfbuf",
+    defaults: ["apf_defaults"],
+    srcs: [
+        "v7/test_buf_allocator.c",
+    ],
+    sdk_version: "24",
+}
+
 cc_binary_host {
     name: "apf_disassembler",
     defaults: ["apf_defaults"],
