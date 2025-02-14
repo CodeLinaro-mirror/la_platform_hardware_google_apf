@@ -766,7 +766,6 @@ static int do_apf_run(apf_context* ctx) {
             u32 offs = imm;
             /* Note: this can overflow and actually decrease offs. */
             if (opcode >= LDBX_OPCODE) offs += ctx->R[1];
-            ASSERT_IN_PACKET_BOUNDS(offs);
             switch (opcode) {
               case LDB_OPCODE:
               case LDBX_OPCODE:
