@@ -28,9 +28,9 @@
 #include <string.h>
 
 #include "disassembler.h"
-#include "apf_interpreter.h"
-#include "v7/apf_interpreter.h"
-#include "v7/test_buf_allocator.h"
+#include "v4/apf_interpreter.h"
+#include "next/apf_interpreter.h"
+#include "next/test_buf_allocator.h"
 
 #define __unused __attribute__((unused))
 

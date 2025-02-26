@@ -19,8 +19,8 @@
 #include <stdio.h>
 #include <stdarg.h>
 
-#include "v7/apf_defs.h"
-#include "v7/apf.h"
+#include "next/apf_defs.h"
+#include "next/apf.h"
 #include "disassembler.h"
 
 // If "c" is of a signed type, generate a compile warning that gets promoted to an error.
@@ -353,10 +353,13 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
                     }
                     while (*ptr2pc < end) {
                         uint8_t byte = program[(*ptr2pc)++];
+                        // value == 0xff is a wildcard that consumes the whole label.
                         // values < 0x40 could be lengths, but - and 0..9 are in practice usually
                         // too long to be lengths so print them as characters. All other chars < 0x40
                         // are not valid in dns character.
-                        if (byte == '-' || (byte >= '0' && byte <= '9') || byte >= 0x40) {
+                        if (byte == 0xff) {
+                            bprintf("(*)");
+                        } else if (byte == '-' || (byte >= '0' && byte <= '9') || byte >= 0x40) {
                             bprintf("%c", byte);
                         } else {
                             bprintf("(%d)", byte);
