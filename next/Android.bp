@@ -73,3 +73,27 @@ sh_test_host {
         unit_test: true,
     },
 }
+
+cc_test_host {
+    name: "apf_checksum_test",
+    srcs: [
+        "apf_checksum_test.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wno-unused-function",
+    ],
+    stl: "c++_static",
+}
+
+cc_test_host {
+    name: "apf_dns_test",
+    srcs: [
+        "apf_dns_test.cc",
+    ],
+    cflags: [
+        "-Wall",
+        "-Wno-unused-function",
+    ],
+    stl: "c++_static",
+}

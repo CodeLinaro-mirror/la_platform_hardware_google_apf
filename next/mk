@@ -1,6 +1,6 @@
 #!/bin/bash
 # Requires:
-#   sudo apt install gcc-arm-linux-gnueabihf gcc-arm-linux-gnueabi
+#   sudo apt install gcc-arm-linux-gnueabihf gcc-arm-linux-gnueabi gcc-aarch64-linux-gnu
 
 set -e
 set -u
@@ -23,6 +23,10 @@ declare -ar FLAGS=(
 )
 
 arm-linux-gnueabi-gcc "${FLAGS[@]}" apf_interpreter.c -c -o apf_interpreter.arm.o
+aarch64-linux-gnu-gcc "${FLAGS[@]}" apf_interpreter.c -c -o apf_interpreter.aarch64.o
 clang -m32 "${FLAGS[@]}" -Wnullable-to-nonnull-conversion -Wthread-safety apf_interpreter.c -c -o apf_interpreter.x86.o
+clang -m64 "${FLAGS[@]}" -Wnullable-to-nonnull-conversion -Wthread-safety apf_interpreter.c -c -o apf_interpreter.x86-64.o
 size apf_interpreter.arm.o
-size apf_interpreter.x86.o
+size apf_interpreter.aarch64.o | tail -n +2
+size apf_interpreter.x86.o | tail -n +2
+size apf_interpreter.x86-64.o | tail -n +2
