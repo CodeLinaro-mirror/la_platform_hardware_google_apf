@@ -36,7 +36,7 @@ int main(void) {
       program[program_len++] = byte;
   }
 
-  for (uint32_t pc = 0; pc < program_len;) {
+  for (uint32_t pc = 0; pc < program_len + 2;) {
       printf("%s\n", apf_disassemble(program, program_len, &pc));
   }
 }
