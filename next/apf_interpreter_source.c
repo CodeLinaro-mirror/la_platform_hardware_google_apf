@@ -355,9 +355,9 @@ static int do_apf_run(apf_context* ctx) {
               case NEG_EXT_OPCODE: REG = -REG;      break;
               case MOV_EXT_OPCODE: REG = OTHER_REG; break;
               case SWAP_EXT_OPCODE: {
-                u32 tmp = REG;
-                REG = OTHER_REG;
-                OTHER_REG = tmp;
+                u32 tmp = ctx->R[0];
+                ctx->R[0] = ctx->R[1];
+                ctx->R[1] = tmp;
                 break;
               }
               case ALLOCATE_EXT_OPCODE:
