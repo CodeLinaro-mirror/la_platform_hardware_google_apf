@@ -29,7 +29,7 @@
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
 char prefix_buf[16];
-char print_buf[8196];
+char print_buf[1024];
 char* buf_ptr;
 int buf_remain;
 bool v6_mode = false;
@@ -83,11 +83,6 @@ static void print_jump_target(uint32_t target, uint32_t program_len) {
         bprintf("PASS");
     } else if (target == program_len + 1) {
         bprintf("DROP");
-    } else if (target > program_len + 1) {
-        uint32_t ofs = target - program_len;
-        uint32_t imm = ofs >> 1;
-        bprintf((ofs & 1) ? "cnt_and_drop" : "cnt_and_pass");
-        bprintf("[cnt=%d]", imm);
     } else {
         bprintf("%u", target);
     }
@@ -333,9 +328,9 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                     }
                     if (imm == EPKTDATACOPYIMM_EXT_OPCODE) {
                         uint32_t len = DECODE_IMM(1);
-                        bprintf("src=r0, len=%d", len);
+                        bprintf(" src=r0, len=%d", len);
                     } else {
-                        bprintf("src=r0, len=r1");
+                        bprintf(" src=r0, len=r1");
                     }
 
                     break;
@@ -460,19 +455,14 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             break;
         }
         case PKTDATACOPY_OPCODE: {
-            uint32_t src_offs = imm;
-            uint32_t copy_len = DECODE_IMM(1);
             if (reg_num == 0) {
                 print_opcode("pktcopy");
-                bprintf("src=%d, len=%d", src_offs, copy_len);
             } else {
                 print_opcode("datacopy");
-                bprintf("src=%d, (%d)", src_offs, copy_len);
-                for (uint32_t i = 0; i < copy_len; ++i) {
-                    uint8_t byte = program[src_offs + i];
-                    bprintf("%02x", byte);
-                }
             }
+            uint32_t src_offs = imm;
+            uint32_t copy_len = DECODE_IMM(1);
+            bprintf("src=%d, len=%d", src_offs, copy_len);
             break;
         }
         // Unknown opcode
