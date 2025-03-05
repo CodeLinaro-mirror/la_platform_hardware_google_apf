@@ -28,6 +28,7 @@
 // superfluous ">= 0" with unsigned expressions generates compile warnings.
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
+char prefix_buf[16];
 char print_buf[1024];
 char* buf_ptr;
 int buf_remain;
@@ -87,26 +88,42 @@ static void print_jump_target(uint32_t target, uint32_t program_len) {
     }
 }
 
-const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const ptr2pc) {
+disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const ptr2pc) {
     buf_ptr = print_buf;
     buf_remain = sizeof(print_buf);
     if (*ptr2pc > program_len + 1) {
+        snprintf(prefix_buf, sizeof(prefix_buf), "(%4u) ", 0);
         bprintf("pc is overflow: pc %d, program_len: %d", *ptr2pc, program_len);
-        return print_buf;
+        disas_ret ret = {
+            .prefix = prefix_buf,
+            .content = print_buf
+        };
+        return ret;
     }
+    uint32_t prev_pc = *ptr2pc;
 
-    bprintf("%8u: ", *ptr2pc);
+    bprintf("%4u: ", *ptr2pc);
 
     if (*ptr2pc == program_len) {
+        snprintf(prefix_buf, sizeof(prefix_buf), "(%4u) ", 0);
         bprintf("PASS");
         ++(*ptr2pc);
-        return print_buf;
+        disas_ret ret = {
+            .prefix = prefix_buf,
+            .content = print_buf
+        };
+        return ret;
     }
 
     if (*ptr2pc == program_len + 1) {
+        snprintf(prefix_buf, sizeof(prefix_buf), "(%4u) ", 0);
         bprintf("DROP");
         ++(*ptr2pc);
-        return print_buf;
+        disas_ret ret = {
+            .prefix = prefix_buf,
+            .content = print_buf
+        };
+        return ret;
     }
 
     const uint8_t bytecode = program[(*ptr2pc)++];
@@ -453,5 +470,10 @@ const char* apf_disassemble(const uint8_t* program, uint32_t program_len, uint32
             bprintf("unknown %u", opcode);
             break;
     }
-    return print_buf;
+    snprintf(prefix_buf, sizeof(prefix_buf), "(%4u) ", (*ptr2pc - prev_pc));
+    disas_ret ret = {
+        .prefix = prefix_buf,
+        .content = print_buf
+    };
+    return ret;
 }
