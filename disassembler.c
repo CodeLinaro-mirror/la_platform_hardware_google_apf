@@ -328,9 +328,9 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                     }
                     if (imm == EPKTDATACOPYIMM_EXT_OPCODE) {
                         uint32_t len = DECODE_IMM(1);
-                        bprintf(" src=r0, len=%d", len);
+                        bprintf("src=r0, len=%d", len);
                     } else {
-                        bprintf(" src=r0, len=r1");
+                        bprintf("src=r0, len=r1");
                     }
 
                     break;
