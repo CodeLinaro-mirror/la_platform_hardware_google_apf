@@ -217,7 +217,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             const uint32_t cmp_imm = DECODE_IMM(1 << (len_field - 1));
             const uint32_t cnt = (cmp_imm >> 11) + 1; // 1+, up to 32 fits in u16
             const uint32_t len = cmp_imm & 2047; // 0..2047
-            bprintf("0x%x, ", len);
+            bprintf("(%u), ", len);
             print_jump_target(*ptr2pc + imm + cnt * len, program_len);
             bprintf(", ");
             if (cnt > 1) {
@@ -233,7 +233,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                 }
             }
             if (cnt > 1) {
-                bprintf(" }");
+                bprintf(" }[%d]", cnt);
             }
             break;
         }
