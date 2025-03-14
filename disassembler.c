@@ -29,7 +29,7 @@
 #define ENFORCE_UNSIGNED(c) ((c)==(uint32_t)(c))
 
 char prefix_buf[16];
-char print_buf[1024];
+char print_buf[8196];
 char* buf_ptr;
 int buf_remain;
 bool v6_mode = false;
@@ -217,7 +217,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             const uint32_t cmp_imm = DECODE_IMM(1 << (len_field - 1));
             const uint32_t cnt = (cmp_imm >> 11) + 1; // 1+, up to 32 fits in u16
             const uint32_t len = cmp_imm & 2047; // 0..2047
-            bprintf("0x%x, ", len);
+            bprintf("(%u), ", len);
             print_jump_target(*ptr2pc + imm + cnt * len, program_len);
             bprintf(", ");
             if (cnt > 1) {
@@ -233,7 +233,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                 }
             }
             if (cnt > 1) {
-                bprintf(" }");
+                bprintf(" }[%d]", cnt);
             }
             break;
         }
@@ -328,9 +328,9 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                     }
                     if (imm == EPKTDATACOPYIMM_EXT_OPCODE) {
                         uint32_t len = DECODE_IMM(1);
-                        bprintf(" src=r0, len=%d", len);
+                        bprintf("src=r0, len=%d", len);
                     } else {
-                        bprintf(" src=r0, len=r1");
+                        bprintf("src=r0, len=r1");
                     }
 
                     break;
@@ -455,14 +455,19 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             break;
         }
         case PKTDATACOPY_OPCODE: {
-            if (reg_num == 0) {
-                print_opcode("pktcopy");
-            } else {
-                print_opcode("datacopy");
-            }
             uint32_t src_offs = imm;
             uint32_t copy_len = DECODE_IMM(1);
-            bprintf("src=%d, len=%d", src_offs, copy_len);
+            if (reg_num == 0) {
+                print_opcode("pktcopy");
+                bprintf("src=%d, len=%d", src_offs, copy_len);
+            } else {
+                print_opcode("datacopy");
+                bprintf("src=%d, (%d)", src_offs, copy_len);
+                for (uint32_t i = 0; i < copy_len; ++i) {
+                    uint8_t byte = program[src_offs + i];
+                    bprintf("%02x", byte);
+                }
+            }
             break;
         }
         // Unknown opcode
