@@ -93,6 +93,28 @@ static void print_jump_target(uint32_t target, uint32_t program_len) {
     }
 }
 
+static void print_qtype(int qtype) {
+    switch(qtype) {
+        case 1:
+            bprintf("A, ");
+            break;
+        case 28:
+            bprintf("AAAA, ");
+            break;
+        case 12:
+            bprintf("PTR, ");
+            break;
+        case 33:
+            bprintf("SRV, ");
+            break;
+        case 16:
+            bprintf("TXT, ");
+            break;
+        default:
+            bprintf("%d, ", qtype);
+    }
+}
+
 disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const ptr2pc) {
     buf_ptr = print_buf;
     buf_remain = sizeof(print_buf);
@@ -371,7 +393,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                     print_jump_target(end + offs, program_len);
                     bprintf(", ");
                     if (imm == JDNSQMATCH_EXT_OPCODE || imm == JDNSQMATCHSAFE_EXT_OPCODE) {
-                        bprintf("%d, ", qtype);
+                        print_qtype(qtype);
                     }
                     while (*ptr2pc < end) {
                         uint8_t byte = program[(*ptr2pc)++];
