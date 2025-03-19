@@ -170,9 +170,16 @@ static int do_apf_run(apf_context* ctx) {
     do {
       APF_TRACE_HOOK(ctx->pc, ctx->R, ctx->program, ctx->program_len,
                      ctx->packet, ctx->packet_len, ctx->mem.slot, ctx->ram_len);
-      if (ctx->pc == ctx->program_len + 1) return DROP;
-      if (ctx->pc == ctx->program_len) return PASS;
-      if (ctx->pc > ctx->program_len) return EXCEPTION;
+      if (ctx->pc >= ctx->program_len) {
+          u32 ofs = ctx->pc - ctx->program_len;
+          u32 imm = ofs >> 1;
+          if (imm > 0xFFFF) return EXCEPTION;
+          if (imm) {
+              if (4 * imm > ctx->ram_len) return EXCEPTION;
+              counter[-(s32)imm]++;
+          }
+          return (ofs & 1) ? DROP : PASS;
+      }
 
       {  // half indent to avoid needless line length...
 
@@ -220,7 +227,6 @@ static int do_apf_run(apf_context* ctx) {
             u32 offs = imm;
             // Note: this can overflow and actually decrease offs.
             if (opcode >= LDBX_OPCODE) offs += ctx->R[1];
-            ASSERT_IN_PACKET_BOUNDS(offs);
             switch (opcode) {
               case LDB_OPCODE:
               case LDBX_OPCODE:
@@ -349,9 +355,9 @@ static int do_apf_run(apf_context* ctx) {
               case NEG_EXT_OPCODE: REG = -REG;      break;
               case MOV_EXT_OPCODE: REG = OTHER_REG; break;
               case SWAP_EXT_OPCODE: {
-                u32 tmp = REG;
-                REG = OTHER_REG;
-                OTHER_REG = tmp;
+                u32 tmp = ctx->R[0];
+                ctx->R[0] = ctx->R[1];
+                ctx->R[1] = tmp;
                 break;
               }
               case ALLOCATE_EXT_OPCODE:
