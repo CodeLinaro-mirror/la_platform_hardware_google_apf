@@ -289,6 +289,7 @@ typedef union {
  * On failure automatically executes 'pass 3'
  */
 #define ALLOCATE_EXT_OPCODE 36
+
 /* Transmit and deallocate the buffer (transmission can be delayed until the program
  * terminates).  Length of buffer is the output buffer pointer (0 means discard).
  * R=1 iff udp style L4 checksum
@@ -299,6 +300,7 @@ typedef union {
  * "e.g. transmit"
  */
 #define TRANSMIT_EXT_OPCODE 37
+
 /* Write 1, 2 or 4 byte value from register to the output buffer and auto-increment the
  * output buffer pointer.
  * e.g. "ewrite1 r0" or "ewrite2 r1"
@@ -317,6 +319,7 @@ typedef union {
  */
 #define EPKTDATACOPYIMM_EXT_OPCODE 41
 #define EPKTDATACOPYR1_EXT_OPCODE 42
+
 /* Jumps if the UDP payload content (starting at R0) does [not] match one
  * of the specified QNAMEs in question records, applying case insensitivity.
  * SAFE version PASSES corrupt packets, while the other one DROPS.
@@ -325,11 +328,15 @@ typedef union {
  * imm1: Extended opcode
  * imm2: Jump label offset
  * imm3(u8): Question type (PTR/SRV/TXT/A/AAAA)
+ *   note: imm3 is instead u16 in '1' version
  * imm4(bytes): null terminated list of null terminated LV-encoded QNAMEs
  * e.g.: "jdnsqeq R0,label,0xc,\002aa\005local\0\0", "jdnsqne R0,label,0xc,\002aa\005local\0\0"
  */
 #define JDNSQMATCH_EXT_OPCODE 43
 #define JDNSQMATCHSAFE_EXT_OPCODE 45
+#define JDNSQMATCH1_EXT_OPCODE 55
+#define JDNSQMATCHSAFE1_EXT_OPCODE 57
+
 /* Jumps if the UDP payload content (starting at R0) does [not] match one
  * of the specified NAMEs in answers/authority/additional records, applying
  * case insensitivity.
@@ -343,6 +350,23 @@ typedef union {
  */
 #define JDNSAMATCH_EXT_OPCODE 44
 #define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+/* Jumps if the UDP payload content (starting at R0) does [not] match one
+ * of the specified QNAMEs in question records, applying case insensitivity.
+ * The qtypes in the input packet can match either of the two supplied qtypes.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
+ * R=0/1 meaning 'does not match'/'matches'
+ * R0: Offset to UDP payload content
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(u8): Question type1 (PTR/SRV/TXT/A/AAAA)
+ * imm4(u8): Question type2 (PTR/SRV/TXT/A/AAAA)
+ * imm5(bytes): null terminated list of null terminated LV-encoded QNAMEs
+ * e.g.: "jdnsqeq2 R0,label,A,AAAA,\002aa\005local\0\0",
+ *       "jdnsqne2 R0,label,A,AAAA,\002aa\005local\0\0"
+ */
+#define JDNSQMATCH2_EXT_OPCODE 51
+#define JDNSQMATCHSAFE2_EXT_OPCODE 53
 
 /* Jump if register is [not] one of the list of values
  * R bit - specifies the register (R0/R1) to test
@@ -360,6 +384,8 @@ typedef union {
  * imm2(u16): Length of exception buffer (located *immediately* after the program itself)
  */
 #define EXCEPTIONBUFFER_EXT_OPCODE 48
+
+/* Note: 51, 53, 55, 57 used up above for DNS matching */
 
 /* This extended opcode is used to implement PKTDATACOPY_OPCODE */
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
@@ -454,14 +480,16 @@ FUNC(match_result_type apf_internal_match_single_name(const u8* needle,
 
 /**
  * Check if DNS packet contains any of the target names with the provided
- * question_type.
+ * question_types.
  *
  * @param needles - non-NULL - pointer to DNS encoded target nameS to match against.
  *   example: [3]foo[3]com[0][3]bar[3]net[0][0]  -- note ends with an extra NULL byte.
  * @param needle_bound - non-NULL - points at first invalid byte past needles.
  * @param udp - non-NULL - pointer to the start of the UDP payload (DNS header).
  * @param udp_len - length of the UDP payload.
- * @param question_type - question type to match against or -1 to match answers.
+ * @param question_type1 - question type to match against or -1 to match answers.
+ *                         If question_type1 is -1, we won't check question_type2.
+ * @param question_type2 - question type to match against or -1 to match answers.
  *
  * @return 1 if matched, 0 if not matched, -1 if error in packet, -2 if error in program.
  */
@@ -469,7 +497,8 @@ FUNC(match_result_type apf_internal_match_names(const u8* needles,
                               const u8* const needle_bound,
                               const u8* const udp,
                               const u32 udp_len,
-                              const int question_type)) {
+                              const int question_type1,
+                              const int question_type2)) {
     u32 num_questions, num_answers;
     if (udp_len < 12) return error_packet;  /* lack of dns header */
 
@@ -490,12 +519,13 @@ FUNC(match_result_type apf_internal_match_names(const u8* needles,
             if (ofs + 2 > udp_len) return error_packet;
             qtype = (int)read_be16(udp + ofs);
             ofs += 4; /* skip be16 qtype & qclass */
-            if (question_type == -1) continue;
+            if (question_type1 == -1) continue;
             if (m == nomatch) continue;
-            if (qtype == 0xFF /* QTYPE_ANY */ || qtype == question_type) return match;
+            if (qtype == 0xFF /* QTYPE_ANY */ || qtype == question_type1 || qtype == question_type2)
+              return match;
         }
         /* match answers */
-        if (question_type == -1) for (i = 0; i < num_answers; ++i) {
+        if (question_type1 == -1) for (i = 0; i < num_answers; ++i) {
             match_result_type m = apf_internal_match_single_name(needles, needle_bound, udp, udp_len, &ofs);
             if (m < nomatch) return m;
             ofs += 8; /* skip be16 type, class & be32 ttl */
@@ -694,9 +724,9 @@ static int do_apf_run(apf_context* ctx) {
     /* upper bound on the number of instructions in the program. */
     u32 instructions_remaining = ctx->program_len;
 
-    /* APFv6 requires at least 5 u32 counters at the end of ram, this makes counter[-5]++ valid */
+    /* APFv6.1 requires at least 6 u32 counters at the end of ram, this makes counter[-6]++ valid */
     /* This cannot wrap due to previous check, that enforced program_len & ram_len < 2GiB. */
-    if (ctx->program_len + 20 > ctx->ram_len) return EXCEPTION;
+    if (ctx->program_len + 24 > ctx->ram_len) return EXCEPTION;
 
     /* Only populate if packet long enough, and IP version is IPv4. */
     /* Note: this doesn't actually check the ethertype... */
@@ -979,26 +1009,45 @@ static int do_apf_run(apf_context* ctx) {
                 ctx->mem.named.tx_buf_offset = dst_offs;
                 break;
               }
-              case JDNSQMATCH_EXT_OPCODE:       /* 43 */
-              case JDNSAMATCH_EXT_OPCODE:       /* 44 */
-              case JDNSQMATCHSAFE_EXT_OPCODE:   /* 45 */
-              case JDNSAMATCHSAFE_EXT_OPCODE: { /* 46 */
+              case JDNSQMATCH_EXT_OPCODE:        /* 43 - 43 =  0 = 0b0000, u8 */
+              case JDNSAMATCH_EXT_OPCODE:        /* 44 - 43 =  1 = 0b0001, */
+              case JDNSQMATCHSAFE_EXT_OPCODE:    /* 45 - 43 =  2 = 0b0010, u8 */
+              case JDNSAMATCHSAFE_EXT_OPCODE:    /* 46 - 43 =  3 = 0b0011, */
+              case JDNSQMATCH2_EXT_OPCODE:       /* 51 - 43 =  8 = 0b1000, u8 u8 */
+              case JDNSQMATCHSAFE2_EXT_OPCODE:   /* 53 - 43 = 10 = 0b1010, u8 u8 */
+              case JDNSQMATCH1_EXT_OPCODE:       /* 55 - 43 = 12 = 0b1100, u16 */
+              case JDNSQMATCHSAFE1_EXT_OPCODE: { /* 57 - 43 = 14 = 0b1110, u16 */
                 u32 jump_offs = decode_imm(ctx, imm_len); /* 2nd imm, at worst 8 B past prog_len */
-                int qtype = -1;
-                if (imm & 1) { /* JDNSQMATCH & JDNSQMATCHSAFE are *odd* extended opcodes */
-                    qtype = DECODE_U8();  /* 3rd imm, at worst 9 bytes past prog_len */
+                int qtype1 = -1;
+                int qtype2;
+                imm -= JDNSQMATCH_EXT_OPCODE;  /* Correction for easier opcode handling */
+                /* Now, we have: */
+                /*   imm & 1 --> no following u8 */
+                /*   imm & 2 --> 'SAFE' */
+                /*   imm & 4 --> join two u8s into a be16 */
+                /*   imm & 8 --> second u8 */
+                /* bit 0 clear means we need to parse a u8, set means 'A' opcode variety */
+                if (!(imm & 1)) qtype1 = DECODE_U8();  /* 3rd imm, at worst 9 bytes past prog_len */
+                /* bit 3 set means we need to parse another u8 */
+                if (imm & 8) {
+                    qtype2 = DECODE_U8();  /* 4th imm, at worst 10 bytes past prog_len */
+                } else {
+                    qtype2 = qtype1;
                 }
+                /* bit 2 set means we need to join the two u8s into a be16 */
+                if (imm & 4) qtype2 = qtype1 = (qtype1 << 8) | qtype2;
                 {
                     u32 udp_payload_offset = ctx->R[0];
                     match_result_type match_rst = apf_internal_match_names(ctx->program + ctx->pc,
                                                               ctx->program + ctx->program_len,
                                                               ctx->packet + udp_payload_offset,
                                                               ctx->packet_len - udp_payload_offset,
-                                                              qtype);
+                                                              qtype1,
+                                                              qtype2);
                     if (match_rst == error_program) return EXCEPTION;
                     if (match_rst == error_packet) {
                         counter[-5]++; /* increment error dns packet counter */
-                        return (imm >= JDNSQMATCHSAFE_EXT_OPCODE) ? PASS : DROP;
+                        return (imm & 2) ? PASS : DROP;  /* imm & 2 detects SAFE opcodes */
                     }
                     while (ctx->pc + 1 < ctx->program_len &&
                            (ctx->program[ctx->pc] || ctx->program[ctx->pc + 1])) {

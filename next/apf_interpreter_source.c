@@ -148,9 +148,9 @@ static int do_apf_run(apf_context* ctx) {
     // upper bound on the number of instructions in the program.
     u32 instructions_remaining = ctx->program_len;
 
-    // APFv6 requires at least 5 u32 counters at the end of ram, this makes counter[-5]++ valid
+    // APFv6.1 requires at least 6 u32 counters at the end of ram, this makes counter[-6]++ valid
     // This cannot wrap due to previous check, that enforced program_len & ram_len < 2GiB.
-    if (ctx->program_len + 20 > ctx->ram_len) return EXCEPTION;
+    if (ctx->program_len + 24 > ctx->ram_len) return EXCEPTION;
 
     // Only populate if packet long enough, and IP version is IPv4.
     // Note: this doesn't actually check the ethertype...
@@ -433,26 +433,45 @@ static int do_apf_run(apf_context* ctx) {
                 ctx->mem.named.tx_buf_offset = dst_offs;
                 break;
               }
-              case JDNSQMATCH_EXT_OPCODE:       // 43
-              case JDNSAMATCH_EXT_OPCODE:       // 44
-              case JDNSQMATCHSAFE_EXT_OPCODE:   // 45
-              case JDNSAMATCHSAFE_EXT_OPCODE: { // 46
+              case JDNSQMATCH_EXT_OPCODE:        // 43 - 43 =  0 = 0b0000, u8
+              case JDNSAMATCH_EXT_OPCODE:        // 44 - 43 =  1 = 0b0001,
+              case JDNSQMATCHSAFE_EXT_OPCODE:    // 45 - 43 =  2 = 0b0010, u8
+              case JDNSAMATCHSAFE_EXT_OPCODE:    // 46 - 43 =  3 = 0b0011,
+              case JDNSQMATCH2_EXT_OPCODE:       // 51 - 43 =  8 = 0b1000, u8 u8
+              case JDNSQMATCHSAFE2_EXT_OPCODE:   // 53 - 43 = 10 = 0b1010, u8 u8
+              case JDNSQMATCH1_EXT_OPCODE:       // 55 - 43 = 12 = 0b1100, u16
+              case JDNSQMATCHSAFE1_EXT_OPCODE: { // 57 - 43 = 14 = 0b1110, u16
                 u32 jump_offs = decode_imm(ctx, imm_len); // 2nd imm, at worst 8 B past prog_len
-                int qtype = -1;
-                if (imm & 1) { // JDNSQMATCH & JDNSQMATCHSAFE are *odd* extended opcodes
-                    qtype = DECODE_U8();  // 3rd imm, at worst 9 bytes past prog_len
+                int qtype1 = -1;
+                int qtype2;
+                imm -= JDNSQMATCH_EXT_OPCODE;  // Correction for easier opcode handling
+                // Now, we have:
+                //   imm & 1 --> no following u8
+                //   imm & 2 --> 'SAFE'
+                //   imm & 4 --> join two u8s into a be16
+                //   imm & 8 --> second u8
+                // bit 0 clear means we need to parse a u8, set means 'A' opcode variety
+                if (!(imm & 1)) qtype1 = DECODE_U8();  // 3rd imm, at worst 9 bytes past prog_len
+                // bit 3 set means we need to parse another u8
+                if (imm & 8) {
+                    qtype2 = DECODE_U8();  // 4th imm, at worst 10 bytes past prog_len
+                } else {
+                    qtype2 = qtype1;
                 }
+                // bit 2 set means we need to join the two u8s into a be16
+                if (imm & 4) qtype2 = qtype1 = (qtype1 << 8) | qtype2;
                 {
                     u32 udp_payload_offset = ctx->R[0];
                     match_result_type match_rst = match_names(ctx->program + ctx->pc,
                                                               ctx->program + ctx->program_len,
                                                               ctx->packet + udp_payload_offset,
                                                               ctx->packet_len - udp_payload_offset,
-                                                              qtype);
+                                                              qtype1,
+                                                              qtype2);
                     if (match_rst == error_program) return EXCEPTION;
                     if (match_rst == error_packet) {
                         counter[-5]++; // increment error dns packet counter
-                        return (imm >= JDNSQMATCHSAFE_EXT_OPCODE) ? PASS : DROP;
+                        return (imm & 2) ? PASS : DROP;  // imm & 2 detects SAFE opcodes
                     }
                     while (ctx->pc + 1 < ctx->program_len &&
                            (ctx->program[ctx->pc] || ctx->program[ctx->pc + 1])) {

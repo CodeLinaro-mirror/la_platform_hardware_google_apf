@@ -233,6 +233,7 @@ typedef union {
  * On failure automatically executes 'pass 3'
  */
 #define ALLOCATE_EXT_OPCODE 36
+
 /* Transmit and deallocate the buffer (transmission can be delayed until the program
  * terminates).  Length of buffer is the output buffer pointer (0 means discard).
  * R=1 iff udp style L4 checksum
@@ -243,6 +244,7 @@ typedef union {
  * "e.g. transmit"
  */
 #define TRANSMIT_EXT_OPCODE 37
+
 /* Write 1, 2 or 4 byte value from register to the output buffer and auto-increment the
  * output buffer pointer.
  * e.g. "ewrite1 r0" or "ewrite2 r1"
@@ -261,6 +263,7 @@ typedef union {
  */
 #define EPKTDATACOPYIMM_EXT_OPCODE 41
 #define EPKTDATACOPYR1_EXT_OPCODE 42
+
 /* Jumps if the UDP payload content (starting at R0) does [not] match one
  * of the specified QNAMEs in question records, applying case insensitivity.
  * SAFE version PASSES corrupt packets, while the other one DROPS.
@@ -269,11 +272,15 @@ typedef union {
  * imm1: Extended opcode
  * imm2: Jump label offset
  * imm3(u8): Question type (PTR/SRV/TXT/A/AAAA)
+ *   note: imm3 is instead u16 in '1' version
  * imm4(bytes): null terminated list of null terminated LV-encoded QNAMEs
  * e.g.: "jdnsqeq R0,label,0xc,\002aa\005local\0\0", "jdnsqne R0,label,0xc,\002aa\005local\0\0"
  */
 #define JDNSQMATCH_EXT_OPCODE 43
 #define JDNSQMATCHSAFE_EXT_OPCODE 45
+#define JDNSQMATCH1_EXT_OPCODE 55
+#define JDNSQMATCHSAFE1_EXT_OPCODE 57
+
 /* Jumps if the UDP payload content (starting at R0) does [not] match one
  * of the specified NAMEs in answers/authority/additional records, applying
  * case insensitivity.
@@ -287,6 +294,23 @@ typedef union {
  */
 #define JDNSAMATCH_EXT_OPCODE 44
 #define JDNSAMATCHSAFE_EXT_OPCODE 46
+
+/* Jumps if the UDP payload content (starting at R0) does [not] match one
+ * of the specified QNAMEs in question records, applying case insensitivity.
+ * The qtypes in the input packet can match either of the two supplied qtypes.
+ * SAFE version PASSES corrupt packets, while the other one DROPS.
+ * R=0/1 meaning 'does not match'/'matches'
+ * R0: Offset to UDP payload content
+ * imm1: Extended opcode
+ * imm2: Jump label offset
+ * imm3(u8): Question type1 (PTR/SRV/TXT/A/AAAA)
+ * imm4(u8): Question type2 (PTR/SRV/TXT/A/AAAA)
+ * imm5(bytes): null terminated list of null terminated LV-encoded QNAMEs
+ * e.g.: "jdnsqeq2 R0,label,A,AAAA,\002aa\005local\0\0",
+ *       "jdnsqne2 R0,label,A,AAAA,\002aa\005local\0\0"
+ */
+#define JDNSQMATCH2_EXT_OPCODE 51
+#define JDNSQMATCHSAFE2_EXT_OPCODE 53
 
 /* Jump if register is [not] one of the list of values
  * R bit - specifies the register (R0/R1) to test
@@ -304,6 +328,8 @@ typedef union {
  * imm2(u16): Length of exception buffer (located *immediately* after the program itself)
  */
 #define EXCEPTIONBUFFER_EXT_OPCODE 48
+
+// Note: 51, 53, 55, 57 used up above for DNS matching
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
