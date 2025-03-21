@@ -115,7 +115,7 @@ static void print_qtype(int qtype) {
     }
 }
 
-disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const ptr2pc) {
+disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t* const ptr2pc, bool is_v6) {
     buf_ptr = print_buf;
     buf_remain = sizeof(print_buf);
     if (*ptr2pc > program_len + 1) {
@@ -273,9 +273,26 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             }
             break;
         case ADD_OPCODE:
+        case AND_OPCODE: {
+            PRINT_OPCODE();
+            if (is_v6) {
+                bprintf(reg_num == 0 ? "r0, " : "r1, ");
+                if (!imm) {
+                    bprintf(reg_num == 1 ? "r0, " : "r1, ");
+                } else {
+                    bprintf("%d", signed_imm);
+                }
+            } else {
+                if (reg_num) {
+                    bprintf("r0, r1");
+                } else {
+                    bprintf("r0, %u", imm);
+                }
+            }
+            break;
+        }
         case MUL_OPCODE:
         case DIV_OPCODE:
-        case AND_OPCODE:
         case OR_OPCODE:
             PRINT_OPCODE();
             if (reg_num) {
