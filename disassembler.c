@@ -52,6 +52,7 @@ static void print_opcode(const char* opcode) {
 
 // Mapping from opcode number to opcode name.
 static const char* opcode_names [] = {
+    [PASSDROP_OPCODE] = NULL,
     [LDB_OPCODE] = "ldb",
     [LDH_OPCODE] = "ldh",
     [LDW_OPCODE] = "ldw",
@@ -72,10 +73,14 @@ static const char* opcode_names [] = {
     [JLT_OPCODE] = "jlt",
     [JSET_OPCODE] = "jset",
     [JBSMATCH_OPCODE] = NULL,
+    [EXT_OPCODE] = NULL,
     [LDDW_OPCODE] = "lddw",
     [STDW_OPCODE] = "stdw",
     [WRITE_OPCODE] = "write",
+    [PKTDATACOPY_OPCODE] = NULL,
     [JNSET_OPCODE] = "jnset",
+    [JBSPTRMATCH_OPCODE] = NULL,
+    [ALLOC_XMIT_OPCODE] = NULL,
 };
 
 static void print_jump_target(uint32_t target, uint32_t program_len) {
@@ -276,15 +281,19 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
         case AND_OPCODE: {
             PRINT_OPCODE();
             if (is_v6) {
-                bprintf(reg_num == 0 ? "r0, " : "r1, ");
+                bprintf("r%d, ", reg_num);
                 if (!imm) {
-                    bprintf(reg_num == 1 ? "r0, " : "r1, ");
+                    bprintf("r%d", 1 - reg_num);
+                } else if (opcode == AND_OPCODE) {
+                    bprintf("0x%x", signed_imm);
                 } else {
                     bprintf("%d", signed_imm);
                 }
             } else {
                 if (reg_num) {
                     bprintf("r0, r1");
+                } else if (opcode == AND_OPCODE) {
+                    bprintf("r0, 0x%x", imm);
                 } else {
                     bprintf("r0, %u", imm);
                 }
@@ -299,6 +308,8 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                 bprintf("r0, r1");
             } else if (!imm && opcode == DIV_OPCODE) {
                 bprintf("pass (div 0)");
+            } else if (opcode == OR_OPCODE) {
+                bprintf("r0, 0x%x", imm);
             } else {
                 bprintf("r0, %u", imm);
             }
@@ -541,6 +552,42 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             }
             break;
         }
+        // JNSET_OPCODE handled up above
+        case JBSPTRMATCH_OPCODE: {
+            print_opcode(reg_num ? "jbsptreq" : "jbsptrne");
+            bprintf("pktofs=%d, ", DECODE_IMM(1));
+            const uint8_t cmp_imm = DECODE_IMM(1);
+            const uint8_t cnt = (cmp_imm >> 4) + 1; // 1..16
+            const uint8_t len = (cmp_imm & 15) + 1; // 1..16
+            bprintf("(%u), ", len);
+            print_jump_target(*ptr2pc + imm + cnt, program_len);
+            bprintf(", ");
+            if (cnt > 1) bprintf("{ ");
+            for (int i = 0; i < cnt; ++i) {
+                uint8_t ofs = program[(*ptr2pc)++];
+                bprintf("@%d[", ofs * 2);
+                for (int j = 0; j < len; ++j) bprintf("%02x", program[3 + 2 * ofs + j]);
+                bprintf("]");
+                if (i != cnt - 1) bprintf(", ");
+            }
+            if (cnt > 1) bprintf(" }[%d]", cnt);
+            break;
+        }
+        case ALLOC_XMIT_OPCODE:
+            if (reg_num) {
+                print_opcode("allocate");
+                bprintf("(%d)", 266 + 8 * imm);
+            } else {
+                if (len_field) {
+                    static const char * const protocol[4] = { "udp", "tcp", "icmp", "alert/icmp" };
+                    print_opcode(imm & 3 ? "transmit" : "transmitudp");
+                    bprintf("offload=%s/%s, partial_csum=0x%x", imm & 4 ? "ipv6" : "ipv4",
+                            protocol[imm & 3], imm >> 3);
+                } else {
+                    print_opcode("transmit");
+                }
+            }
+            break;
         // Unknown opcode
         default:
             bprintf("unknown %u", opcode);

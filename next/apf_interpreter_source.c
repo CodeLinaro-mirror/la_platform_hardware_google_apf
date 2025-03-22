@@ -316,6 +316,25 @@ static int do_apf_run(apf_context* ctx) {
             if (matched ^ !reg_num) ctx->pc += imm;
             break;
           }
+          case JBSPTRMATCH_OPCODE: {
+            u32 ofs = DECODE_U8();    // 2nd imm, at worst 5 bytes past prog_len
+            u8 cmp_imm = DECODE_U8(); // 3rd imm, at worst 6 bytes past prog_len
+            u8 cnt = (cmp_imm >> 4) + 1; // 1..16 bytestrings to match
+            u8 len = (cmp_imm & 15) + 1; // 1..16 bytestring length
+            const u32 last_packet_offs = ofs + len - 1;  // min 0+1-1=0, max 255+16-1=270
+            bool matched = false;
+            // imm is jump target offset.
+            // [ofs..last_packet_offs] are packet bytes to compare.
+            ASSERT_IN_PACKET_BOUNDS(last_packet_offs);
+            // cnt underflow on final iteration not an issue as not used after loop.
+            // 4th (through max 19th) u8 immediates, this reaches at most 22 bytes past prog_len
+            // This assumes min ram size of 529 bytes, where APFv6.1 has min ram size of 3000
+            // the +3 is to skip over the APFv6 'datajmp' instruction, while 2* to have access to 526 bytes,
+            // Primary purpose is for mac (6) & ipv6 (16) addresses, so even offsets should be easy...
+            while (cnt--) matched |= !memcmp(ctx->program + 3 + 2 * DECODE_U8(), ctx->packet + ofs, len);
+            if (matched ^ !reg_num) ctx->pc += imm;
+            break;
+          }
           // There is a difference in APFv4 and APFv6 arithmetic behaviour!
           // APFv4:  R[0] op= Rbit ? R[1] : imm;  (and it thus doesn't make sense to have R=1 && len_field>0)
           // APFv6+: REG  op= len_field ? imm : OTHER_REG;  (note: this is *DIFFERENT* with R=1 len_field==0)
@@ -361,13 +380,16 @@ static int do_apf_run(apf_context* ctx) {
                 break;
               }
               case ALLOCATE_EXT_OPCODE:
+              do_allocate:
                 ASSERT_RETURN(ctx->tx_buf == NULL);
-                if (reg_num == 0) {
+                if (opcode == ALLOC_XMIT_OPCODE) {
+                    ctx->tx_buf_len = 266 + 8 * imm;
+                } else if (reg_num == 0) {
                     ctx->tx_buf_len = REG;
                 } else {
                     ctx->tx_buf_len = decode_be16(ctx); // 2nd imm, at worst 6 B past prog_len
                 }
-                // checksumming functions requires minimum 266 byte buffer for correctness
+                // checksumming functions require minimum 266 byte buffer for correctness
                 if (ctx->tx_buf_len < 266) ctx->tx_buf_len = 266;
                 ctx->tx_buf = apf_allocate_buffer(ctx->caller_ctx, ctx->tx_buf_len);
                 if (!ctx->tx_buf) {  // allocate failure
@@ -378,15 +400,38 @@ static int do_apf_run(apf_context* ctx) {
                 memset(ctx->tx_buf, 0, ctx->tx_buf_len);
                 ctx->mem.named.tx_buf_offset = 0;
                 break;
-              case TRANSMIT_EXT_OPCODE: {
+              case TRANSMIT_EXT_OPCODE:
+              do_transmit: {
                 // tx_buf_len cannot be large because we'd run out of RAM,
                 // so the above unsigned comparison effectively guarantees casting pkt_len
                 // to a signed value does not result in it going negative.
-                u8 ip_ofs = DECODE_U8();              // 2nd imm, at worst 5 B past prog_len
-                u8 csum_ofs = DECODE_U8();            // 3rd imm, at worst 6 B past prog_len
+                u8 ip_ofs;
+                u8 csum_ofs;
                 u8 csum_start = 0;
                 u16 partial_csum = 0;
+                bool udp = reg_num;
                 u32 pkt_len = ctx->mem.named.tx_buf_offset;
+                if (opcode != ALLOC_XMIT_OPCODE) {
+                    // parse TRANSMIT_EXT_OPCODE arguments
+                    ip_ofs = DECODE_U8();                 // 2nd imm, at worst 5 B past prog_len
+                    csum_ofs = DECODE_U8();               // 3rd imm, at worst 6 B past prog_len
+                    if (csum_ofs < 255) {
+                        csum_start = DECODE_U8();         // 4th imm, at worst 7 B past prog_len
+                        partial_csum = decode_be16(ctx);  // 5th imm, at worst 9 B past prog_len
+                    }
+                } else if (imm_len) {
+                    // parse ALLOC_XMIT_OPCODE (R=0) immediate
+                    static const u8 auto_csum_start[8] = { 26, 26, 34, 38, 22, 22, 22, 22 };
+                    static const u8 auto_csum_ofs[8] =   { 40, 44, 36, 40, 60, 64, 56, 64 };
+                    ip_ofs = 14;
+                    csum_ofs = auto_csum_ofs[imm & 7];
+                    csum_start = auto_csum_start[imm & 7];
+                    partial_csum = imm >> 3;
+                    udp = !(imm & 3);
+                } else {
+                    // ALLOC_XMIT_OPCODE (R=0) with no immediate
+                    ip_ofs = csum_ofs = 255;
+                }
                 ASSERT_RETURN(ctx->tx_buf);
                 // If pkt_len > allocate_buffer_len, it means sth. wrong
                 // happened and the tx_buf should be deallocated.
@@ -394,14 +439,9 @@ static int do_apf_run(apf_context* ctx) {
                     do_discard_buffer(ctx);
                     return EXCEPTION;
                 }
-                if (csum_ofs < 255) {
-                    csum_start = DECODE_U8();         // 4th imm, at worst 7 B past prog_len
-                    partial_csum = decode_be16(ctx);  // 5th imm, at worst 9 B past prog_len
-                }
                 {
                     int dscp = csum_and_return_dscp(ctx->tx_buf, (s32)pkt_len, ip_ofs,
-                                                    partial_csum, csum_start, csum_ofs,
-                                                    (bool)reg_num);
+                                                    partial_csum, csum_start, csum_ofs, udp);
                     int ret = do_transmit_buffer(ctx, pkt_len, dscp);
                     if (ret) { counter[-4]++; return EXCEPTION; } // transmit failure
                 }
@@ -569,6 +609,9 @@ static int do_apf_run(apf_context* ctx) {
             }
             break;
           }
+          case ALLOC_XMIT_OPCODE:
+            if (reg_num) goto do_allocate; else goto do_transmit;
+            break;
           default:  // Unknown opcode
             return EXCEPTION;  // Bail out
         }
