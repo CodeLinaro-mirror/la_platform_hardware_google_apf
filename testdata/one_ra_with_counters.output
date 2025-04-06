@@ -27,25 +27,25 @@
       96 ffffffac       (   2)  295: ldm         r0, m[15]
        0 ffffffac       (   5)  297: jgt         r0, 0x258, 495
        0 ffffffac       (   1)  302: li          r0, 0
-       0 ffffffac       (  18)  303: jbsne       r0, 0xf, 495, 428e66343deb28a24b792e9086dd68
+       0 ffffffac       (  18)  303: jbsne       r0, (15), 495, 428e66343deb28a24b792e9086dd68
        0 ffffffac       (   2)  321: li          r0, 18
-      12 ffffffac       (  41)  323: jbsne       r0, 0x26, 495, 00603afffe8000000000000002005efffe000265fe80000000000000408e66fffe343deb8600
+      12 ffffffac       (  41)  323: jbsne       r0, (38), 495, 00603afffe8000000000000002005efffe000265fe80000000000000408e66fffe343deb8600
       12 ffffffac       (   2)  364: li          r0, 58
-      3a ffffffac       (   5)  366: jbsne       r0, 0x2, 495, 4000
+      3a ffffffac       (   5)  366: jbsne       r0, (2), 495, 4000
       3a ffffffac       (   2)  371: ldh         r0, [60]
      e10 ffffffac       (   5)  373: jlt         r0, 0x258, 495
      e10 ffffffac       (   2)  378: li          r0, 62
-      3e ffffffac       (  23)  380: jbsne       r0, 0x14, 495, 0000000000000000010100005e00026519050000
+      3e ffffffac       (  23)  380: jbsne       r0, (20), 495, 0000000000000000010100005e00026519050000
       3e ffffffac       (   2)  403: ldw         r0, [82]
      e10 ffffffac       (   5)  405: jlt         r0, 0x258, 495
      e10 ffffffac       (   2)  410: li          r0, 86
-      56 ffffffac       (  39)  412: jbsne       r0, 0x24, 495, 2001486048600000000000000000884420014860486000000000000000008888030440c0
+      56 ffffffac       (  39)  412: jbsne       r0, (36), 495, 2001486048600000000000000000884420014860486000000000000000008888030440c0
       56 ffffffac       (   2)  451: ldw         r0, [122]
   278d00 ffffffac       (   5)  453: jlt         r0, 0x258, 495
   278d00 ffffffac       (   2)  458: ldw         r0, [126]
    93a80 ffffffac       (   5)  460: jlt         r0, 0x258, 495
    93a80 ffffffac       (   3)  465: li          r0, 130
-      82 ffffffac       (  23)  468: jbsne       r0, 0x14, 495, 000000002a0079e10abc0e000000000000000000
+      82 ffffffac       (  23)  468: jbsne       r0, (20), 495, 000000002a0079e10abc0e000000000000000000
       82 ffffffac       (   2)  491: li          r1, -56
       82 ffffffc8       (   2)  493: jmp         503
       82 ffffffc8       (   1)  503: lddw        r0, [r1]
