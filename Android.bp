@@ -149,6 +149,21 @@ cc_object {
 }
 
 cc_library_static {
+    name: "libapf_nan",
+    defaults: ["apf_defaults"],
+    device_supported: true,
+    host_supported: true,
+    local_include_dirs: [
+        "next-nan",
+    ],
+    export_include_dirs: ["."],
+    srcs: [
+        "next-nan/apf_interpreter.c",
+    ],
+    sdk_version: "minimum",
+}
+
+cc_library_static {
     name: "libapf",
     defaults: ["apf_defaults"],
     device_supported: true,
