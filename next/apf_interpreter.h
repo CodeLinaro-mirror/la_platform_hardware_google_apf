@@ -64,8 +64,12 @@ extern "C" {
  * |              |                   |                  |
  * |              |                   |           [Packet Ingress]
  * |              |                   |                  |    |
- * |              |                   |                  |    |-- apf_run_header(state, hdr2, vlan_tag, hdr3)
- * |              |                   |                  |    '-- apf_run_packet(state, pkt, len)
+ * |              |                   |                  |    |-- [Option 1: Full Packet] (default)
+ * |              |                   |                  |    |   '-- apf_run_full_data_packet(state, pkt, len)
+ * |              |                   |                  |    |
+ * |              |                   |                  |    '-- [Option 2: Two-Stage Filter]
+ * |              |                   |                  |        |-- apf_run_header(state, hdr2, vlan_tag, hdr3)
+ * |              |                   |                  |        '-- apf_run_packet(state, pkt, len)
  * |              |                   |                  |
  * |-- Netlink -->|                   |                  |
  * |              |- ndo_apf_disable->|    (interface)   |
@@ -441,10 +445,12 @@ uint32_t apf_ticks_until_next_timer_event(uint32_t *precision);
  */
 bool apf_process_timer_event(void);
 
+#ifndef APF_TWO_STAGE_FILTER
+
 /**
  * Runs the installed APF program over a full packet.
  *
- * The return value of apf_run_packet indicates whether the packet should
+ * The return value of apf_run_full_data_packet indicates whether the packet should
  * be passed or dropped. As a part of execution, the APF program can call
  * apf_allocate_tx_buffer() and apf_transmit_tx_buffer() to construct and
  * transmit a reply packet.
@@ -465,8 +471,10 @@ bool apf_process_timer_event(void);
  *             - packet_len shorter than ETH_HLEN (14)
  *           As such, you may want to log a firmware exception if 2 is ever returned...
  */
-int apf_run_packet(struct apf_state *state, const uint8_t *const packet,
-                   const uint32_t packet_len);
+int apf_run_full_data_packet(struct apf_state *state, const uint8_t *const packet,
+                             const uint32_t packet_len);
+
+#else
 
 /*
  * NOTE: we plan to support packet pre-filtering via apf_run_header():
@@ -482,7 +490,16 @@ int apf_run_packet(struct apf_state *state, const uint8_t *const packet,
  *                    const u8 *const ether_hdr,  [14..18 bytes]
  *                    int vlan_tag,
  *                    const u8 *const packet_hdr, [44 bytes] [const u32 pkt_hdr_len]);
+ *
+ * Returns:
+ *   DROP(0)
+ *   PASS(1)
+ *   ERROR(2+) meaning PASS
+ * int apf_run_packet(struct apf_state *state, const uint8_t *const packet,
+ *                    const uint32_t packet_len);
  */
+
+#endif
 
 #ifdef __cplusplus
 }

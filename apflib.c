@@ -47,7 +47,7 @@
 #define apf_resume apfnext__apf_resume
 #define apf_ticks_until_next_timer_event apfnext__apf_ticks_until_next_timer_event
 #define apf_process_timer_event apfnext__apf_process_timer_event
-#define apf_run_packet apfnext__apf_run_packet
+#define apf_run_full_data_packet apfnext__apf_run_full_data_packet
 #include <next/apf_interpreter.h>
 #undef apf_get_info
 #undef apf_set_id
@@ -60,7 +60,7 @@
 #undef apf_resume
 #undef apf_ticks_until_next_timer_event
 #undef apf_process_timer_event
-#undef apf_run_packet
+#undef apf_run_full_data_packet
 
 #include <stddef.h>
 #include "apflib.h"
@@ -95,7 +95,7 @@ int apf_session_run_packet(struct apf_state *state,
                            uint32_t packet_len,
                            uint32_t filter_age_16384ths) {
     apf_test_set_time_in_ticks(filter_age_16384ths);
-    int result = apfnext__apf_run_packet(state, packet, packet_len);
+    int result = apfnext__apf_run_full_data_packet(state, packet, packet_len);
     apf_test_clear_time_in_ticks();
     return result;
 }

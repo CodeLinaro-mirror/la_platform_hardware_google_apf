@@ -969,7 +969,8 @@ static int do_apf_run(apf_context *ctx) {
     return EXCEPTION;
 }
 
-int apf_run_packet(struct apf_state *state, const u8 *const packet, const u32 packet_len) {
+#ifndef APF_TWO_STAGE_FILTER
+int apf_run_full_data_packet(struct apf_state *state, const u8 *const packet, const u32 packet_len) {
     if (!state) return EXCEPTION;
 
     // Any valid ethernet packet should be at least ETH_HLEN long...
@@ -1025,5 +1026,6 @@ int apf_run_packet(struct apf_state *state, const u8 *const packet, const u32 pa
     }
     return ret;
 }
-FOR_KERNEL(apf_run_packet)
+FOR_KERNEL(apf_run_full_data_packet)
+#endif
 
