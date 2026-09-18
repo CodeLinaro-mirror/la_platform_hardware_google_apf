@@ -1,3 +1,8 @@
 # Bug component: 31808
 set noparent
 file:platform/packages/modules/Connectivity:main:/OWNERS_core_networking
+
+# OWNERS for code-isolation upstream merge process only.
+achant@google.com #{LAST_RESORT_SUGGESTION}
+baligh@google.com #{LAST_RESORT_SUGGESTION}
+yichunko@google.com #{LAST_RESORT_SUGGESTION}
