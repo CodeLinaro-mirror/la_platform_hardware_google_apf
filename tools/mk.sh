@@ -11,7 +11,7 @@ set -u
 declare -r NL='../../../../external/libnl'
 declare -r NLIB="${NL}/lib"
 
-for tool in brcm_apf_tool qcom_apf_tool apf_tool; do
+for tool in brcm_apf_tool qcom_apf_tool apf_tool apf_tool_nl80211; do
   gcc -Wall -Werror -D__unused= -I/usr/include/libnl3 "${tool}.c" -o "${tool}.exe" -lnl-3 -lnl-genl-3
   aarch64-linux-gnu-gcc -static \
     -D__unused='__attribute__((unused))' \
