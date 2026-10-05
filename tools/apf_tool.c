@@ -1,7 +1,7 @@
 /*
  * apf_tool.c
  *
- * A vendor-agnostic command-line tool for interacting with the net_apf
+ * A vendor-agnostic command-line tool for interacting with the net-apf
  * generic netlink interface. This tool can be used to query APF info,
  * manage APF lifecycle and RAM, install APF bytecode programs, read/write APF
  * RAM, and configure hardware fast path on any compliant network device.
@@ -23,8 +23,6 @@
 #include <netlink/genl/ctrl.h>
 
 #include "net_apf.h"
-
-#define APF_ATTR_MAX APF_ATTR_FP_ENABLE_IPV6
 
 // ----- HELPER FUNCTIONS -----
 
@@ -75,17 +73,17 @@ static int parse_mac(const char *str, unsigned char *mac) {
     return -1;
 }
 
-// Helper to allocate and initialize a net_apf Netlink message with IFINDEX.
+// Helper to allocate and initialize a net-apf Netlink message with IFINDEX.
 static struct nl_msg *alloc_apf_msg(int family_id, int if_index, int cmd, int flags) {
     struct nl_msg *msg = nlmsg_alloc_size(65536);
     if (!msg) return NULL;
 
     if (!genlmsg_put(msg, NL_AUTO_PID, NL_AUTO_SEQ, family_id, 0,
-                     NLM_F_REQUEST | flags, cmd, APF_FAMILY_VERSION)) {
+                     NLM_F_REQUEST | flags, cmd, NET_APF_FAMILY_VERSION)) {
         nlmsg_free(msg);
         return NULL;
     }
-    if (nla_put_u32(msg, APF_ATTR_IFINDEX, if_index) < 0) {
+    if (nla_put_u32(msg, NET_APF_A_IFINDEX, if_index) < 0) {
         nlmsg_free(msg);
         return NULL;
     }
@@ -102,55 +100,55 @@ static int send_and_recv(struct nl_sock *sock, struct nl_msg *msg) {
 
 static int parse_get_info_reply(struct nl_msg *msg, __unused void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
-    struct nlattr *tb[APF_ATTR_MAX + 1];
+    struct nlattr *tb[NET_APF_A_MAX + 1];
 
-    if (nla_parse(tb, APF_ATTR_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
+    if (nla_parse(tb, NET_APF_A_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
         fprintf(stderr, "Failed to parse netlink attributes.\n");
         return NL_SKIP;
     }
 
     printf("APF Info:\n");
-    if (tb[APF_ATTR_INFO_VERSION])
-        printf("  Version: %u\n", nla_get_u32(tb[APF_ATTR_INFO_VERSION]));
-    if (tb[APF_ATTR_INFO_ID])
-        printf("  Instance ID: %u\n", nla_get_u32(tb[APF_ATTR_INFO_ID]));
-    if (tb[APF_ATTR_INFO_TOTAL_RAM])
-        printf("  Total RAM: %u bytes\n", nla_get_u32(tb[APF_ATTR_INFO_TOTAL_RAM]));
-    if (tb[APF_ATTR_INFO_USED_RAM])
-        printf("  Used RAM: %u bytes\n", nla_get_u32(tb[APF_ATTR_INFO_USED_RAM]));
-    if (tb[APF_ATTR_INFO_OVERHEAD])
-        printf("  Overhead: %u bytes\n", nla_get_u32(tb[APF_ATTR_INFO_OVERHEAD]));
-    if (tb[APF_ATTR_INFO_GRANULARITY])
-        printf("  Granularity: %u bytes\n", nla_get_u32(tb[APF_ATTR_INFO_GRANULARITY]));
+    if (tb[NET_APF_A_INFO_VERSION])
+        printf("  Version: %u\n", nla_get_u32(tb[NET_APF_A_INFO_VERSION]));
+    if (tb[NET_APF_A_INFO_CHIP_ID])
+        printf("  Chip ID: %u\n", nla_get_u32(tb[NET_APF_A_INFO_CHIP_ID]));
+    if (tb[NET_APF_A_INFO_TOTAL_RAM])
+        printf("  Total RAM: %u bytes\n", nla_get_u32(tb[NET_APF_A_INFO_TOTAL_RAM]));
+    if (tb[NET_APF_A_INFO_USED_RAM])
+        printf("  Used RAM: %u bytes\n", nla_get_u32(tb[NET_APF_A_INFO_USED_RAM]));
+    if (tb[NET_APF_A_INFO_OVERHEAD])
+        printf("  Overhead: %u bytes\n", nla_get_u32(tb[NET_APF_A_INFO_OVERHEAD]));
+    if (tb[NET_APF_A_INFO_GRANULARITY])
+        printf("  Granularity: %u bytes\n", nla_get_u32(tb[NET_APF_A_INFO_GRANULARITY]));
     return NL_OK;
 }
 
 static int parse_get_ram_size_reply(struct nl_msg *msg, __unused void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
-    struct nlattr *tb[APF_ATTR_MAX + 1];
+    struct nlattr *tb[NET_APF_A_MAX + 1];
 
-    if (nla_parse(tb, APF_ATTR_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
+    if (nla_parse(tb, NET_APF_A_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
         fprintf(stderr, "Failed to parse netlink attributes.\n");
         return NL_SKIP;
     }
 
-    if (tb[APF_ATTR_RAM_SIZE])
-        printf("Allocated RAM Size: %u bytes\n", nla_get_u32(tb[APF_ATTR_RAM_SIZE]));
+    if (tb[NET_APF_A_RAM_SIZE])
+        printf("Allocated RAM Size: %u bytes\n", nla_get_u32(tb[NET_APF_A_RAM_SIZE]));
     return NL_OK;
 }
 
 static int parse_read_reply(struct nl_msg *msg, __unused void *arg) {
     struct genlmsghdr *gnlh = nlmsg_data(nlmsg_hdr(msg));
-    struct nlattr *tb[APF_ATTR_MAX + 1];
+    struct nlattr *tb[NET_APF_A_MAX + 1];
 
-    if (nla_parse(tb, APF_ATTR_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
+    if (nla_parse(tb, NET_APF_A_MAX, genlmsg_attrdata(gnlh, 0), genlmsg_attrlen(gnlh, 0), NULL) < 0) {
         fprintf(stderr, "Failed to parse netlink attributes.\n");
         return NL_SKIP;
     }
 
-    if (tb[APF_ATTR_DATA]) {
-        unsigned char *data = nla_data(tb[APF_ATTR_DATA]);
-        int len = nla_len(tb[APF_ATTR_DATA]);
+    if (tb[NET_APF_A_DATA]) {
+        unsigned char *data = nla_data(tb[NET_APF_A_DATA]);
+        int len = nla_len(tb[NET_APF_A_DATA]);
         printf("APF RAM Data (%d bytes):\n", len);
         for (int i = 0; i < len; i++) {
             printf("%02x", data[i]);
@@ -169,17 +167,11 @@ static void print_usage(const char *name) {
     fprintf(stderr, "  set_id <id>                         Set chip-level APF instance identifier\n");
     fprintf(stderr, "  enable <ram_size>                   Enable APF with requested RAM size\n");
     fprintf(stderr, "  get_ram_size                        Query allocated RAM size\n");
-    fprintf(stderr, "  read [offset [len]]                 Read APF RAM (default: offset 0, len -1 for all RAM)\n");
-    fprintf(stderr, "  write <offset> <hex_data>           Write to APF RAM (offset >= 0) or install program (offset -1)\n");
+    fprintf(stderr, "  read [offset [len]]                 Read APF RAM (default: all allocated RAM)\n");
+    fprintf(stderr, "  write <hex_data> [offset]           Write to APF RAM at offset, or install program if no offset\n");
     fprintf(stderr, "  disable                             Disable APF and free allocated state\n");
-    fprintf(stderr, "  set_fast_path <mac> <vlan> <ip> <v6> Configure hardware fast path filtering\n");
-    fprintf(stderr, "\nSpecial Values:\n");
-    fprintf(stderr, "  read:          len = -1 (default) reads all allocated RAM; offset must be 0\n");
-    fprintf(stderr, "  write:         offset = -1 installs a new bytecode program\n");
-    fprintf(stderr, "                 offset >= 0 writes raw data at that byte offset\n");
-    fprintf(stderr, "  set_fast_path: vlan = -1 disables VLAN tag filtering\n");
-    fprintf(stderr, "                 ip = 0 or 0.0.0.0 disables IPv4 unicast filtering\n");
-    fprintf(stderr, "                 v6 = 1 enables IPv6 fast path, 0 disables\n");
+    fprintf(stderr, "  set_fast_path <mac> [vlan-tag=<n>] [ucast-addr4=<ip>] [enable-ipv6]\n");
+    fprintf(stderr, "                                      Configure hardware fast path filtering\n");
     fprintf(stderr, "\nExamples:\n");
     fprintf(stderr, "  %s wlan0 get_info\n", name);
     fprintf(stderr, "  %s wlan0 set_id 1\n", name);
@@ -187,10 +179,10 @@ static void print_usage(const char *name) {
     fprintf(stderr, "  %s wlan0 get_ram_size\n", name);
     fprintf(stderr, "  %s wlan0 read\n", name);
     fprintf(stderr, "  %s wlan0 read 0 1024\n", name);
-    fprintf(stderr, "  %s wlan0 write -1 00\n", name);
-    fprintf(stderr, "  %s wlan0 write 0 deadbeef\n", name);
+    fprintf(stderr, "  %s wlan0 write 00\n", name);
+    fprintf(stderr, "  %s wlan0 write deadbeef 0\n", name);
     fprintf(stderr, "  %s wlan0 disable\n", name);
-    fprintf(stderr, "  %s wlan0 set_fast_path 02:00:00:00:00:01 -1 192.168.1.100 1\n", name);
+    fprintf(stderr, "  %s wlan0 set_fast_path 02:00:00:00:00:01 ucast-addr4=192.168.1.100 enable-ipv6\n", name);
 }
 
 // ----- MAIN -----
@@ -222,17 +214,17 @@ int main(int argc, char **argv) {
         ret = -1; goto cleanup_sock;
     }
 
-    int family_id = genl_ctrl_resolve(sock, APF_FAMILY_NAME);
+    int family_id = genl_ctrl_resolve(sock, NET_APF_FAMILY_NAME);
     if (family_id < 0) {
         fprintf(stderr, "Failed to resolve %s family: %s. Is the kernel module loaded?\n",
-                APF_FAMILY_NAME, nl_geterror(family_id));
+                NET_APF_FAMILY_NAME, nl_geterror(family_id));
         ret = -1; goto cleanup_sock;
     }
 
     struct nl_msg *msg = NULL;
 
     if (strcmp(command, "get_info") == 0) {
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_GET_INFO, 0);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_GET_INFO, 0);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, parse_get_info_reply, NULL);
@@ -247,16 +239,16 @@ int main(int argc, char **argv) {
         }
         uint32_t id = (uint32_t)strtoul(argv[3], NULL, 0);
 
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_SET_ID, NLM_F_ACK);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_SET_ID, NLM_F_ACK);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
-        nla_put_u32(msg, APF_ATTR_INFO_ID, id);
+        nla_put_u32(msg, NET_APF_A_INFO_CHIP_ID, id);
 
         ret = send_and_recv(sock, msg);
         if (ret < 0) {
             fprintf(stderr, "Failed to set APF ID: %s\n", nl_geterror(ret));
         } else {
-            printf("Successfully set APF instance ID to %u.\n", id);
+            printf("Successfully set APF chip ID to %u.\n", id);
         }
 
     } else if (strcmp(command, "enable") == 0) {
@@ -271,10 +263,10 @@ int main(int argc, char **argv) {
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_ENABLE, NLM_F_ACK);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_ENABLE, NLM_F_ACK);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
-        nla_put_u32(msg, APF_ATTR_RAM_SIZE, (uint32_t)ram_size);
+        nla_put_u32(msg, NET_APF_A_RAM_SIZE, (uint32_t)ram_size);
 
         ret = send_and_recv(sock, msg);
         if (ret < 0) {
@@ -284,7 +276,7 @@ int main(int argc, char **argv) {
         }
 
     } else if (strcmp(command, "get_ram_size") == 0) {
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_GET_RAM_SIZE, 0);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_GET_RAM_SIZE, 0);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, parse_get_ram_size_reply, NULL);
@@ -292,53 +284,45 @@ int main(int argc, char **argv) {
         if (ret < 0) fprintf(stderr, "Failed to query APF RAM size: %s\n", nl_geterror(ret));
 
     } else if (strcmp(command, "read") == 0) {
-        int offset = (argc >= 4) ? atoi(argv[3]) : 0;
-        int len = (argc >= 5) ? atoi(argv[4]) : -1;
-
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_READ, 0);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_READ, 0);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
-        nla_put_s32(msg, APF_ATTR_OFFSET, offset);
-        nla_put_s32(msg, APF_ATTR_DATA_LEN, len);
+        if (argc >= 4) nla_put_u32(msg, NET_APF_A_OFFSET, (uint32_t)atoi(argv[3]));
+        if (argc >= 5) nla_put_u32(msg, NET_APF_A_DATA_LEN, (uint32_t)atoi(argv[4]));
 
         nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, parse_read_reply, NULL);
         ret = send_and_recv(sock, msg);
         if (ret < 0) fprintf(stderr, "Failed to read APF RAM: %s\n", nl_geterror(ret));
 
     } else if (strcmp(command, "write") == 0) {
-        if (argc < 5) {
-            fprintf(stderr, "Error: 'write' command requires offset and hex data string.\n");
+        if (argc < 4) {
+            fprintf(stderr, "Error: 'write' command requires hex data string.\n");
             print_usage(argv[0]);
             ret = -1; goto cleanup_sock;
         }
-        int offset = atoi(argv[3]);
-        if (offset < -1) {
-            fprintf(stderr, "Error: Offset must be -1 (install program) or non-negative (0..32767).\n");
-            ret = -1; goto cleanup_sock;
-        }
         unsigned char *data_bytes = NULL;
-        int data_len = parse_hex_alloc(argv[4], &data_bytes);
+        int data_len = parse_hex_alloc(argv[3], &data_bytes);
         if (data_len < 0) {
             fprintf(stderr, "Error: Invalid hex data string.\n");
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_WRITE, NLM_F_ACK);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_WRITE, NLM_F_ACK);
         if (!msg) { free(data_bytes); ret = -ENOMEM; goto cleanup_sock; }
 
-        nla_put_s32(msg, APF_ATTR_OFFSET, offset);
-        nla_put(msg, APF_ATTR_DATA, data_len, data_bytes);
+        nla_put(msg, NET_APF_A_DATA, data_len, data_bytes);
+        if (argc >= 5) nla_put_u32(msg, NET_APF_A_OFFSET, (uint32_t)atoi(argv[4]));
         free(data_bytes);
 
         ret = send_and_recv(sock, msg);
         if (ret < 0) {
             fprintf(stderr, "Failed to write APF RAM: %s\n", nl_geterror(ret));
         } else {
-            printf("Successfully wrote %d bytes to APF RAM at offset %d.\n", data_len, offset);
+            printf("Successfully wrote %d bytes to APF RAM.\n", data_len);
         }
 
     } else if (strcmp(command, "disable") == 0) {
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_DISABLE, NLM_F_ACK);
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_DISABLE, NLM_F_ACK);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         ret = send_and_recv(sock, msg);
@@ -349,8 +333,8 @@ int main(int argc, char **argv) {
         }
 
     } else if (strcmp(command, "set_fast_path") == 0) {
-        if (argc < 7) {
-            fprintf(stderr, "Error: 'set_fast_path' requires <mac> <vlan_tag> <ipv4_addr> <enable_ipv6>\n");
+        if (argc < 4) {
+            fprintf(stderr, "Error: 'set_fast_path' requires <mac>\n");
             print_usage(argv[0]);
             ret = -1; goto cleanup_sock;
         }
@@ -359,25 +343,26 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Error: Invalid MAC address '%s'\n", argv[3]);
             ret = -1; goto cleanup_sock;
         }
-        int16_t vlan_tag = (int16_t)atoi(argv[4]);
-        struct in_addr ip4_addr;
-        if (inet_pton(AF_INET, argv[5], &ip4_addr) != 1) {
-            if (strcmp(argv[5], "0") == 0) {
-                ip4_addr.s_addr = 0;
+
+        msg = alloc_apf_msg(family_id, if_index, NET_APF_CMD_SET_FAST_PATH, NLM_F_ACK);
+        if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
+
+        nla_put(msg, NET_APF_A_FP_UCAST_MAC, ETH_ALEN, mac);
+        for (int i = 4; i < argc; i++) {
+            struct in_addr ip4_addr;
+            if (strncmp(argv[i], "vlan-tag=", 9) == 0) {
+                nla_put_u16(msg, NET_APF_A_FP_VLAN_TAG, (uint16_t)atoi(argv[i] + 9));
+            } else if (strncmp(argv[i], "ucast-addr4=", 12) == 0 &&
+                       inet_pton(AF_INET, argv[i] + 12, &ip4_addr) == 1) {
+                nla_put_u32(msg, NET_APF_A_FP_UCAST_ADDR4, ip4_addr.s_addr);
+            } else if (strcmp(argv[i], "enable-ipv6") == 0) {
+                nla_put_flag(msg, NET_APF_A_FP_ENABLE_IPV6);
             } else {
-                fprintf(stderr, "Error: Invalid IPv4 address '%s'\n", argv[5]);
+                fprintf(stderr, "Error: Invalid argument '%s'\n", argv[i]);
+                nlmsg_free(msg);
                 ret = -1; goto cleanup_sock;
             }
         }
-        uint8_t enable_ipv6 = (uint8_t)atoi(argv[6]);
-
-        msg = alloc_apf_msg(family_id, if_index, APF_CMD_SET_FAST_PATH, NLM_F_ACK);
-        if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
-
-        nla_put(msg, APF_ATTR_FP_UCAST_MAC, ETH_ALEN, mac);
-        nla_put_s16(msg, APF_ATTR_FP_VLAN_TAG, vlan_tag);
-        nla_put_u32(msg, APF_ATTR_FP_UCAST_ADDR4, ip4_addr.s_addr);
-        nla_put_u8(msg, APF_ATTR_FP_ENABLE_IPV6, enable_ipv6);
 
         ret = send_and_recv(sock, msg);
         if (ret < 0) {
