@@ -1,5 +1,6 @@
 {
     "presubmit": [
-        { "name": "NetworkStackTests" }
+        { "name": "NetworkStackTests" },
+        { "name": "apf_generator_test" }
     ]
 }

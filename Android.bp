@@ -184,6 +184,7 @@ cc_library_static {
 cc_library_static {
     name: "libapfdisassembler",
     defaults: ["apf_defaults"],
+    host_supported: true,
     export_include_dirs: ["."],
     srcs: [
         "disassembler.c",
