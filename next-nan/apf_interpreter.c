@@ -1648,3 +1648,23 @@ int apf_run_packet(struct apf_state *state, const u8 *const packet, const u32 pa
 }
 FOR_KERNEL(apf_run_packet)
 
+int apf_run_mgmt(struct apf_state *state, const u8 *const frame, const u32 frame_len,
+                 const u32 freq_mhz, const s8 rssi_dbm) {
+    // TODO: implement
+    (void)state;
+    (void)frame;
+    (void)frame_len;
+    (void)freq_mhz;
+    (void)rssi_dbm;
+    return PASS;
+}
+FOR_KERNEL(apf_run_mgmt)
+
+int apf_run_dw(struct apf_state *state, const u32 freq_mhz) {
+    // TODO: implement
+    (void)state;
+    (void)freq_mhz;
+    return 0;
+}
+FOR_KERNEL(apf_run_dw)
+

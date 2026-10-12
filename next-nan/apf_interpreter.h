@@ -67,6 +67,14 @@ extern "C" {
  * |              |                   |                  |    |-- apf_run_header(state, hdr2, vlan_tag, hdr3)
  * |              |                   |                  |    '-- apf_run_packet(state, pkt, len)
  * |              |                   |                  |
+ * |              |                   |       [802.11 Mgmt Frame Ingress]
+ * |              |                   |                  |    |
+ * |              |                   |                  |    '-- apf_run_mgmt(state, frame, len, freq, rssi)
+ * |              |                   |                  |
+ * |              |                   |       [Start of each NAN Discovery Window]
+ * |              |                   |                  |    |
+ * |              |                   |                  |    '-- apf_run_dw(state, freq)
+ * |              |                   |                  |
  * |-- Netlink -->|                   |                  |
  * |              |- ndo_apf_disable->|    (interface)   |
  * |              |                   |------ RPC ------>|
@@ -330,6 +338,96 @@ int apf_transmit_tx_buffer(struct apf_fw_ctx *ctx, uint8_t *ptr, uint32_t len, u
  */
 int apf_transmit_rx_buffer(struct apf_fw_ctx *ctx, uint8_t *ptr, uint32_t len, uint8_t dscp);
 
+/**
+ * Allocates a buffer for the APF program to build an 802.11 management frame
+ * (for example a Wi-Fi Aware Service Discovery Frame).
+ *
+ * The buffer is scratch space for a single transmission: the APF program
+ * builds the frame in it (typically by copying a frame template stored in
+ * APF RAM) and passes it to apf_transmit_mgmt_buffer(). Frame templates are
+ * part of the APF program/data and are not allocated through this function.
+ *
+ * Unless in a critical low memory state, the firmware must allow allocating at
+ * least one 2328 byte buffer (24 byte header + 2304 byte maximum MMPDU body) for
+ * every call to apf_run_mgmt() or apf_run_dw(). The interpreter will have at most
+ * one active allocation at any given time, and will always either transmit or
+ * deallocate the buffer before apf_run_mgmt() or apf_run_dw() returns.
+ *
+ * A single apf_run_mgmt() or apf_run_dw() call may allocate and transmit
+ * multiple buffers one after another (for example, several Service Discovery
+ * Frames in one Discovery Window), so the firmware must not limit allocations
+ * to one per call.
+ *
+ * The firmware MAY choose to allocate a larger buffer than requested, and
+ * give the apf_interpreter a pointer to the middle of the buffer (where the
+ * 802.11 Frame Control field begins). This will allow firmware to later (during
+ * or after apf_transmit_mgmt_buffer call) populate any required TX descriptors,
+ * the FCS, etc.
+ *
+ * @param ctx - unmodified ctx pointer passed into apf_enable().
+ * @param size - the minimum size of buffer to allocate
+ * @return the pointer to the allocated region. The function can return NULL to
+ *         indicate allocation failure, for example if too many buffers are
+ *         pending transmit. Returning NULL will most likely result in the
+ *         frame not being transmitted, and apf_run_mgmt() returning PASS or
+ *         apf_run_dw() returning an error.
+ */
+uint8_t *apf_allocate_mgmt_buffer(struct apf_fw_ctx *ctx, uint32_t size);
+
+/**
+ * Transmits the allocated 802.11 management frame buffer and deallocates it.
+ *
+ * Ownership of the buffer passes to the firmware, which frees it once the
+ * transmission completes (there is no separate deallocation function).
+ * The apf_interpreter will not read/write from/to the buffer once it calls
+ * this function.
+ *
+ * The content of the buffer between [ptr, ptr + len) are the bytes to be
+ * transmitted, starting from the 802.11 Frame Control field and not including
+ * the FCS. The APF program fills in the frame body and the header, including
+ * the addresses (the frame is sent to Address 1). The APF program only builds
+ * unprotected frames (eg. Public Action frames) and the firmware does not
+ * encrypt them. The firmware does not need to parse or modify the frame body,
+ * but is responsible for:
+ *   - assigning the 802.11 Sequence Number,
+ *   - filling in the Duration field,
+ *   - computing and appending the 4 byte FCS,
+ *   - transmitting at a non-CCK rate, as wpa_supplicant does for Wi-Fi Aware
+ *     frames (NL80211_ATTR_TX_NO_CCK_RATE).
+ *
+ * The firmware is expected to make its best effort to transmit. If it
+ * exhausts retries, or cannot get on the requested channel in time, then it
+ * is OK for the frame to be dropped. The firmware should prefer to fail
+ * allocation if it can predict transmit will fail.
+ *
+ * apf_transmit_mgmt_buffer() may be asynchronous, which means the actual frame
+ * transmission can happen sometime after the function returns.
+ *
+ * @param ctx - unmodified ctx pointer passed into apf_enable().
+ * @param ptr - pointer to the transmit buffer, must have been previously
+ *              returned by apf_allocate_mgmt_buffer() and not deallocated.
+ * @param len - the number of bytes to be transmitted (possibly less than
+ *              the allocated buffer), 0 means don't transmit the buffer
+ *              but only deallocate it.
+ * @param freq_mhz - the frequency to transmit on, 0 means no channel switch:
+ *                   the current channel (eg. the Discovery Window channel
+ *                   during apf_run_dw()).
+ *                   If this is not the current channel, the firmware switches to
+ *                   it to transmit. This is the freq argument of wpa_supplicant's
+ *                   send_action() driver op (NL80211_ATTR_WIPHY_FREQ, plus
+ *                   NL80211_ATTR_OFFCHANNEL_TX_OK when non-zero).
+ * @param wait_time_ms - only used when switching to another channel: how long to
+ *                       stay on it after transmitting to wait for a response,
+ *                       0 means no need to stay. This is the wait_time argument
+ *                       of send_action() (NL80211_ATTR_DURATION).
+ * @return non-zero if the firmware *knows* the transmit will fail, zero if
+ *         the transmit succeeded or the firmware thinks it will succeed.
+ *         Returning an error will likely result in apf_run_mgmt() returning PASS
+ *         or apf_run_dw() returning an error.
+ */
+int apf_transmit_mgmt_buffer(struct apf_fw_ctx *ctx, uint8_t *ptr, uint32_t len,
+                             uint32_t freq_mhz, uint32_t wait_time_ms);
+
 /****************************************
  * APF core definitions (do not modify) *
  ****************************************/
@@ -378,6 +476,7 @@ void apf_set_id(uint32_t id);
  * will be remembered by apf in the apf_state, and passed through to all other calls.
  * Will return NULL on memory exhaustion.
  * After this function returns non-NULL non-fast-path ingress must go via apf_run_header()/apf_run_packet()
+ * (and received 802.11 Public Action frames via apf_run_mgmt())
  * This will return a pointer returned by apf_allocate_state(fw_ctx, overhead + ram_size + …)
  */
 struct apf_state *apf_enable(struct apf_fw_ctx *ctx, uint32_t ram_size);
@@ -467,6 +566,63 @@ bool apf_process_timer_event(void);
  */
 int apf_run_packet(struct apf_state *state, const uint8_t *const packet,
                    const uint32_t packet_len);
+
+/**
+ * Runs the installed APF program over a received 802.11 management frame.
+ *
+ * Must be called on every received 802.11 Public Action frame (on the
+ * interface for which the program was installed) addressed to this device
+ * or to a group address, before it is delivered to the host. The APF program
+ * is expected to pass frames it does not handle (eg. non Wi-Fi Aware frames),
+ * so normal Wi-Fi operation is unaffected.
+ *
+ * As a part of execution, the APF program can call apf_allocate_mgmt_buffer()
+ * and apf_transmit_mgmt_buffer() to construct and transmit an 802.11
+ * management frame.
+ *
+ * @param state - non-NULL state returned by apf_enable(). The caller must not
+ *                make concurrent apf_run_packet(), apf_run_mgmt() or apf_run_dw()
+ *                calls using the same state.
+ * @param frame - the full frame bytes, starting from the 802.11 Frame Control field.
+ * @param frame_len - the length of {@code frame} in bytes, not including the FCS.
+ * @param freq_mhz - the channel frequency the frame was received on (eg. 2437).
+ * @param rssi_dbm - the measured RSSI of the frame in dBm (eg. -65).
+ *
+ * @return zero if frame should be dropped,
+ *         non-zero if frame should be passed, specifically:
+ *         - 1 on normal apf program execution,
+ *         - 2 on exceptional circumstances (caused by bad firmware integration).
+ *           The firmware should log an error if 2 is returned.
+ */
+int apf_run_mgmt(struct apf_state *state, const uint8_t *const frame,
+                 const uint32_t frame_len, const uint32_t freq_mhz,
+                 const int8_t rssi_dbm);
+
+/**
+ * Runs the installed APF program to transmit Service Discovery Frames (SDFs)
+ * in a Wi-Fi Aware (NAN) Discovery Window (DW).
+ *
+ * Must be called at the start of each Discovery Window. This corresponds to
+ * the NL80211_CMD_NAN_NEXT_DW_NOTIFICATION event, to which a host discovery
+ * engine (wpa_supplicant) responds by transmitting its multicast SDFs
+ * (unsolicited publish and active subscribe).
+ *
+ * There is no triggering frame. As a part of execution, the APF program can
+ * call apf_allocate_mgmt_buffer() and apf_transmit_mgmt_buffer() (with
+ * freq_mhz 0) to transmit SDFs. The firmware transmits them during this
+ * Discovery Window, and should drop them if that is not possible.
+ *
+ * @param state - non-NULL state returned by apf_enable(). The caller must not
+ *                make concurrent apf_run_packet(), apf_run_mgmt() or apf_run_dw()
+ *                calls using the same state.
+ * @param freq_mhz - the frequency of the Discovery Window (eg. 2437 or 5745),
+ *                   as in NL80211_CMD_NAN_NEXT_DW_NOTIFICATION.
+ *
+ * @return zero on success, non-zero if an error occurred (for example an SDF
+ *         could not be allocated or transmitted, or bad firmware integration).
+ *         The firmware should log an error if non-zero is returned.
+ */
+int apf_run_dw(struct apf_state *state, const uint32_t freq_mhz);
 
 /*
  * NOTE: we plan to support packet pre-filtering via apf_run_header():
