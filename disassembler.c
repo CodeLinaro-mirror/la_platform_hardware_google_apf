@@ -272,10 +272,19 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
         }
         case SH_OPCODE:
             PRINT_OPCODE();
-            if (reg_num) {
-                bprintf("r0, r1");
+            if (is_v6) {
+                bprintf("r%d, ", reg_num);
+                if (!len_field) {
+                    bprintf("r%d", 1 - reg_num);
+                } else {
+                    bprintf("%d", signed_imm);
+                }
             } else {
-                bprintf("r0, %d", signed_imm);
+                if (reg_num) {
+                    bprintf("r0, r1");
+                } else {
+                    bprintf("r0, %d", signed_imm);
+                }
             }
             break;
         case ADD_OPCODE:
@@ -283,7 +292,7 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
             PRINT_OPCODE();
             if (is_v6) {
                 bprintf("r%d, ", reg_num);
-                if (!imm) {
+                if (!len_field) {
                     bprintf("r%d", 1 - reg_num);
                 } else if (opcode == AND_OPCODE) {
                     bprintf("0x%x", signed_imm);
@@ -305,14 +314,29 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
         case DIV_OPCODE:
         case OR_OPCODE:
             PRINT_OPCODE();
-            if (reg_num) {
-                bprintf("r0, r1");
-            } else if (!imm && opcode == DIV_OPCODE) {
-                bprintf("pass (div 0)");
-            } else if (opcode == OR_OPCODE) {
-                bprintf("r0, 0x%x", imm);
+            if (is_v6) {
+                if (len_field && !imm && opcode == DIV_OPCODE) {
+                    bprintf("pass (div 0)");
+                } else {
+                    bprintf("r%d, ", reg_num);
+                    if (!len_field) {
+                        bprintf("r%d", 1 - reg_num);
+                    } else if (opcode == OR_OPCODE) {
+                        bprintf("0x%x", imm);
+                    } else {
+                        bprintf("%u", imm);
+                    }
+                }
             } else {
-                bprintf("r0, %u", imm);
+                if (reg_num) {
+                    bprintf("r0, r1");
+                } else if (!imm && opcode == DIV_OPCODE) {
+                    bprintf("pass (div 0)");
+                } else if (opcode == OR_OPCODE) {
+                    bprintf("r0, 0x%x", imm);
+                } else {
+                    bprintf("r0, %u", imm);
+                }
             }
             break;
         case LI_OPCODE:
