@@ -43,6 +43,8 @@ struct apf_instruction {
      * during operand sizing in get_insn_operand_sizes().
      */
     uint32_t imm;
+    /* Explicit write width (1, 2, or 4 bytes) for WRITE_OPCODE; 0 otherwise. */
+    uint8_t write_size;
 
     bool has_target;
     int16_t target_label;
@@ -87,7 +89,7 @@ struct apf_generator {
 
 static int apf_gen_fail_with(struct apf_generator *gen, enum apf_gen_err err) {
     if (gen && gen->err == APF_GEN_OK) {
-        gen->err = err;
+        gen->err = gen->generated ? APF_GEN_ERR_ALREADY_GENERATED : err;
         gen->err_insn_index =
             (gen->count >= PROLOGUE_INSN_COUNT) ? (gen->count - PROLOGUE_INSN_COUNT) : 0;
     }
@@ -145,7 +147,7 @@ static bool is_valid_user_counter(uint16_t cnt) {
 }
 
 static bool validate_and_track_target_label(struct apf_generator *gen, apf_label tgt_label) {
-    if (!gen || tgt_label.id == APF_LABEL_INVALID.id) {
+    if (!gen || gen->generated || tgt_label.id == APF_LABEL_INVALID.id) {
         return false;
     }
     if (tgt_label.id >= 0) {
@@ -419,9 +421,13 @@ int apf_gen_set_data(struct apf_generator *gen, const uint8_t *data, uint16_t le
             return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
         }
         memcpy(copy, data, len);
+        free(gen->insns[0].extra_bytes);
         gen->insns[0].extra_bytes = copy;
         gen->insns[0].extra_len = len;
         gen->insns[0].imm = len;
+    } else {
+        free(gen->insns[0].extra_bytes);
+        gen->insns[0].extra_bytes = NULL;
     }
     return 0;
 }
@@ -459,6 +465,9 @@ int apf_gen_add_jlt_r1(struct apf_generator *gen, apf_label tgt_label) {
 }
 
 int apf_gen_add_jset(struct apf_generator *gen, uint32_t val, apf_label tgt_label) {
+    if (val == 0) {
+        return apf_gen_fail(gen);
+    }
     return apf_gen_add_branch_insn(gen, JSET_OPCODE, APF_REG_R0, val, tgt_label);
 }
 
@@ -466,17 +475,59 @@ int apf_gen_add_jset_r1(struct apf_generator *gen, apf_label tgt_label) {
     return apf_gen_add_branch_insn(gen, JSET_OPCODE, APF_REG_R1, 0, tgt_label);
 }
 
-static int apf_gen_add_jbsmatch_insn(struct apf_generator *gen, enum apf_register reg,
-                                     apf_label tgt_label, const uint8_t *bytes, uint16_t len) {
-    if (!bytes || len == 0 || len > 2047 || !validate_and_track_target_label(gen, tgt_label)) {
+int apf_gen_add_jnset(struct apf_generator *gen, uint32_t val, apf_label tgt_label) {
+    if (val == 0) {
+        return apf_gen_fail(gen);
+    }
+    return apf_gen_add_branch_insn(gen, JNSET_OPCODE, APF_REG_R0, val, tgt_label);
+}
+
+int apf_gen_add_jnset_r1(struct apf_generator *gen, apf_label tgt_label) {
+    return apf_gen_add_branch_insn(gen, JNSET_OPCODE, APF_REG_R1, 0, tgt_label);
+}
+
+static bool apf_gen_check_mutable(struct apf_generator *gen) {
+    if (!gen) {
+        return false;
+    }
+    if (gen->generated) {
+        apf_gen_fail_with(gen, APF_GEN_ERR_ALREADY_GENERATED);
+        return false;
+    }
+    return true;
+}
+
+static bool has_duplicate_byte_patterns(const uint8_t *bytes, uint8_t cnt, uint16_t len) {
+    for (uint8_t i = 0; i < cnt; i++) {
+        const uint8_t *p1 = bytes + (size_t)i * (size_t)len;
+        for (uint8_t j = (uint8_t)(i + 1); j < cnt; j++) {
+            const uint8_t *p2 = bytes + (size_t)j * (size_t)len;
+            if (memcmp(p1, p2, len) == 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static int apf_gen_add_jbsmatch_multi_insn(struct apf_generator *gen, enum apf_register reg,
+                                           apf_label tgt_label, const uint8_t *bytes,
+                                           uint8_t cnt, uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (!bytes || cnt == 0 || cnt > 32 || len == 0 || len > 2047 ||
+        has_duplicate_byte_patterns(bytes, cnt, len) ||
+        !validate_and_track_target_label(gen, tgt_label)) {
         return apf_gen_fail(gen);
     }
 
-    uint8_t *copy = malloc(len);
+    uint32_t total_bytes = (uint32_t)cnt * (uint32_t)len;
+    uint8_t *copy = malloc(total_bytes);
     if (!copy) {
         return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
     }
-    memcpy(copy, bytes, len);
+    memcpy(copy, bytes, total_bytes);
 
     struct apf_instruction *insn = apf_gen_add_insn(gen, JBSMATCH_OPCODE, (uint8_t)reg);
     if (!insn) {
@@ -487,20 +538,469 @@ static int apf_gen_add_jbsmatch_insn(struct apf_generator *gen, enum apf_registe
     insn->has_target = true;
     insn->target_label = tgt_label.id;
     insn->has_imm = true;
-    insn->imm = (uint32_t)len;
+    /* Bits [15:11] encode (cnt - 1); bits [10:0] encode pattern length. */
+    insn->imm = (((uint32_t)(cnt - 1) & 0x1F) << 11) | (uint32_t)len;
     insn->extra_bytes = copy;
-    insn->extra_len = len;
+    insn->extra_len = total_bytes;
     return 0;
 }
 
 int apf_gen_add_jbsne(struct apf_generator *gen, apf_label tgt_label,
                       const uint8_t *bytes, uint16_t len) {
-    return apf_gen_add_jbsmatch_insn(gen, APF_REG_R0, tgt_label, bytes, len);
+    return apf_gen_add_jbsmatch_multi_insn(gen, APF_REG_R0, tgt_label, bytes, 1, len);
 }
 
 int apf_gen_add_jbseq(struct apf_generator *gen, apf_label tgt_label,
                       const uint8_t *bytes, uint16_t len) {
-    return apf_gen_add_jbsmatch_insn(gen, APF_REG_R1, tgt_label, bytes, len);
+    return apf_gen_add_jbsmatch_multi_insn(gen, APF_REG_R1, tgt_label, bytes, 1, len);
+}
+
+int apf_gen_add_jbsne_multi(struct apf_generator *gen, apf_label tgt_label,
+                            const uint8_t *bytes, uint8_t cnt, uint16_t len) {
+    return apf_gen_add_jbsmatch_multi_insn(gen, APF_REG_R0, tgt_label, bytes, cnt, len);
+}
+
+int apf_gen_add_jbseq_multi(struct apf_generator *gen, apf_label tgt_label,
+                            const uint8_t *bytes, uint8_t cnt, uint16_t len) {
+    return apf_gen_add_jbsmatch_multi_insn(gen, APF_REG_R1, tgt_label, bytes, cnt, len);
+}
+
+/*
+ * Helper to find or append a byte sequence in the leading JMPDATA instruction.
+ * When count_by_two is true (for speculative JBSPTRMATCH placement, whose
+ * 1-byte pointer encodes offset / 2), offsets step by 2 bytes (0, 2, ..., 510)
+ * and capacity overflows return -1 without latching an error so the caller can
+ * fall back to LI + JBSMATCH. When false (for PKTDATACOPY/EDATACOPY), offsets
+ * step by 1 byte and exceeding 65535 bytes latches APF_GEN_ERR_DATA_OVERFLOW.
+ */
+static int find_or_append_data_bytes(struct apf_generator *gen, const uint8_t *bytes,
+                                     uint32_t total_len, bool count_by_two) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (gen->count < PROLOGUE_INSN_COUNT || !bytes || total_len == 0) {
+        return apf_gen_fail(gen);
+    }
+    struct apf_instruction *jmpdata = &gen->insns[0];
+    if (jmpdata->opcode != JMP_OPCODE || jmpdata->reg != APF_REG_R1) {
+        return apf_gen_fail(gen);
+    }
+
+    uint32_t step = count_by_two ? 2 : 1;
+    for (uint32_t ofs = 0; ofs + total_len <= jmpdata->extra_len; ofs += step) {
+        if (count_by_two && ofs > 510) {
+            break;
+        }
+        if (memcmp(jmpdata->extra_bytes + ofs, bytes, total_len) == 0) {
+            return (int)ofs;
+        }
+    }
+
+    uint32_t pad = (count_by_two && (jmpdata->extra_len & 1)) ? 1 : 0;
+    uint32_t target_ofs = jmpdata->extra_len + pad;
+    if (count_by_two && target_ofs > 510) {
+        return -1;
+    }
+    uint32_t new_len = target_ofs + total_len;
+    if (new_len > 0xFFFF) {
+        return count_by_two ? -1 : apf_gen_fail_with(gen, APF_GEN_ERR_DATA_OVERFLOW);
+    }
+
+    uint8_t *new_buf = realloc(jmpdata->extra_bytes, new_len);
+    if (!new_buf) {
+        return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    }
+    if (pad) {
+        new_buf[jmpdata->extra_len] = 0;
+    }
+    memcpy(new_buf + target_ofs, bytes, total_len);
+    jmpdata->extra_bytes = new_buf;
+    jmpdata->extra_len = new_len;
+    jmpdata->imm = new_len;
+    return (int)target_ofs;
+}
+
+static int apf_gen_add_jbs_at_offset_multi_insn(struct apf_generator *gen,
+                                                enum apf_register reg,
+                                                uint32_t pkt_offset, apf_label tgt_label,
+                                                const uint8_t *bytes, uint8_t cnt,
+                                                uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (!bytes || cnt == 0 || cnt > 32 || len == 0 || len > 2047 ||
+        pkt_offset > (uint32_t)INT32_MAX ||
+        has_duplicate_byte_patterns(bytes, cnt, len) ||
+        !validate_and_track_target_label(gen, tgt_label)) {
+        return apf_gen_fail(gen);
+    }
+
+    /*
+     * Prefer the compact APFv6.1 JBSPTRMATCH instruction when pkt_offset fits
+     * in 1 byte (<= 255), cnt <= 16, len <= 16, and all patterns can be placed
+     * at even offsets <= 510 within the JMPDATA constant pool:
+     *   extra[0]: packet offset (0..255)
+     *   extra[1]: ((cnt - 1) << 4) | (len - 1)
+     *   extra[2..2+cnt-1]: data pool offsets divided by 2 (0..255 -> 0..510)
+     */
+    if (pkt_offset <= 255 && cnt <= 16 && len <= 16 && gen->count >= PROLOGUE_INSN_COUNT &&
+        gen->insns[0].opcode == JMP_OPCODE && gen->insns[0].reg == APF_REG_R1) {
+        uint32_t saved_data_size = gen->insns[0].extra_len;
+        uint8_t ptrs[16];
+        bool all_ok = true;
+        for (uint8_t s = 0; s < cnt; s++) {
+            int rel_ofs = find_or_append_data_bytes(
+                gen, bytes + (size_t)s * (size_t)len, len, true);
+            if (rel_ofs < 0) {
+                all_ok = false;
+                break;
+            }
+            ptrs[s] = (uint8_t)(rel_ofs / 2);
+        }
+        if (all_ok) {
+            uint32_t extra_len = 2 + (uint32_t)cnt;
+            uint8_t *extra = malloc(extra_len);
+            if (!extra) {
+                gen->insns[0].extra_len = saved_data_size;
+                gen->insns[0].imm = saved_data_size;
+                return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+            }
+            extra[0] = (uint8_t)pkt_offset;
+            extra[1] = (uint8_t)(((cnt - 1) << 4) | (len - 1));
+            memcpy(extra + 2, ptrs, cnt);
+
+            struct apf_instruction *insn =
+                apf_gen_add_insn(gen, JBSPTRMATCH_OPCODE, (uint8_t)reg);
+            if (!insn) {
+                free(extra);
+                gen->insns[0].extra_len = saved_data_size;
+                gen->insns[0].imm = saved_data_size;
+                return -1;
+            }
+            insn->has_target = true;
+            insn->target_label = tgt_label.id;
+            insn->extra_bytes = extra;
+            insn->extra_len = extra_len;
+            return 0;
+        }
+        /* Restore JMPDATA length before falling back to LI + JBSMATCH. */
+        gen->insns[0].extra_len = saved_data_size;
+        gen->insns[0].imm = saved_data_size;
+        if (gen->err == APF_GEN_ERR_OUT_OF_MEMORY) {
+            return -1;
+        }
+    }
+
+    size_t saved_count = gen->count;
+    bool was_ok = (gen->err == APF_GEN_OK);
+    if (apf_gen_add_li(gen, APF_REG_R0, (int32_t)pkt_offset) < 0) {
+        return -1;
+    }
+    if (apf_gen_add_jbsmatch_multi_insn(gen, reg, tgt_label, bytes, cnt, len) < 0) {
+        gen->count = saved_count;
+        if (was_ok && gen->err != APF_GEN_OK) {
+            gen->err_insn_index =
+                (saved_count >= PROLOGUE_INSN_COUNT) ? (saved_count - PROLOGUE_INSN_COUNT) : 0;
+        }
+        return -1;
+    }
+    return 0;
+}
+
+int apf_gen_add_jbsne_at_offset(struct apf_generator *gen, uint32_t pkt_offset,
+                                apf_label tgt_label, const uint8_t *bytes, uint16_t len) {
+    return apf_gen_add_jbs_at_offset_multi_insn(gen, APF_REG_R0, pkt_offset, tgt_label,
+                                                bytes, 1, len);
+}
+
+int apf_gen_add_jbseq_at_offset(struct apf_generator *gen, uint32_t pkt_offset,
+                                apf_label tgt_label, const uint8_t *bytes, uint16_t len) {
+    return apf_gen_add_jbs_at_offset_multi_insn(gen, APF_REG_R1, pkt_offset, tgt_label,
+                                                bytes, 1, len);
+}
+
+int apf_gen_add_jbsne_at_offset_multi(struct apf_generator *gen, uint32_t pkt_offset,
+                                      apf_label tgt_label, const uint8_t *bytes,
+                                      uint8_t cnt, uint16_t len) {
+    return apf_gen_add_jbs_at_offset_multi_insn(gen, APF_REG_R0, pkt_offset, tgt_label,
+                                                bytes, cnt, len);
+}
+
+int apf_gen_add_jbseq_at_offset_multi(struct apf_generator *gen, uint32_t pkt_offset,
+                                      apf_label tgt_label, const uint8_t *bytes,
+                                      uint8_t cnt, uint16_t len) {
+    return apf_gen_add_jbs_at_offset_multi_insn(gen, APF_REG_R1, pkt_offset, tgt_label,
+                                                bytes, cnt, len);
+}
+
+static bool has_duplicate_u32_values(const uint32_t *values, uint8_t cnt) {
+    for (uint8_t i = 0; i < cnt; i++) {
+        for (uint8_t j = (uint8_t)(i + 1); j < cnt; j++) {
+            if (values[i] == values[j]) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static int apf_gen_add_joneof_insn(struct apf_generator *gen, enum apf_register reg,
+                                   bool jmp_if_not_in_set, apf_label tgt_label,
+                                   const uint32_t *values, uint8_t cnt) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (!is_valid_reg(reg) || !values || cnt < 2 || cnt > 33 ||
+        has_duplicate_u32_values(values, cnt) ||
+        !validate_and_track_target_label(gen, tgt_label)) {
+        return apf_gen_fail(gen);
+    }
+
+    uint32_t max_val = 0;
+    for (uint8_t i = 0; i < cnt; i++) {
+        if (values[i] > max_val) max_val = values[i];
+    }
+    uint8_t elem_len = (max_val > 0xFFFFFFu) ? 4
+                       : (max_val > 0xFFFFu) ? 3
+                       : (max_val > 0xFFu)   ? 2
+                                             : 1;
+
+    uint32_t extra_len = 1 + (uint32_t)cnt * elem_len;
+    uint8_t *extra = malloc(extra_len);
+    if (!extra) {
+        return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    }
+    /*
+     * JONEOF extra[0] header: [cnt - 2 (5b)][elem_len - 1 (2b)][jne (1b)],
+     * followed by cnt big-endian elements of elem_len (1..4) bytes each.
+     */
+    extra[0] = (uint8_t)((((cnt - 2) & 0x1F) << 3) | (((elem_len - 1) & 0x03) << 1) |
+                         (jmp_if_not_in_set ? 1 : 0));
+    uint8_t *p = extra + 1;
+    for (uint8_t i = 0; i < cnt; i++) {
+        uint32_t v = values[i];
+        for (int b = (int)elem_len - 1; b >= 0; b--) {
+            *p++ = (uint8_t)((v >> (b * 8)) & 0xFF);
+        }
+    }
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, EXT_OPCODE, (uint8_t)reg);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = JONEOF_EXT_OPCODE;
+    insn->has_target = true;
+    insn->target_label = tgt_label.id;
+    insn->extra_bytes = extra;
+    insn->extra_len = extra_len;
+    return 0;
+}
+
+int apf_gen_add_joneof(struct apf_generator *gen, enum apf_register reg, apf_label tgt_label,
+                       const uint32_t *values, uint8_t cnt) {
+    return apf_gen_add_joneof_insn(gen, reg, false, tgt_label, values, cnt);
+}
+
+int apf_gen_add_jnoneof(struct apf_generator *gen, enum apf_register reg, apf_label tgt_label,
+                        const uint32_t *values, uint8_t cnt) {
+    return apf_gen_add_joneof_insn(gen, reg, true, tgt_label, values, cnt);
+}
+
+/*
+ * -------------------------------------------------------------------------
+ * DNS Matching Instructions
+ * -------------------------------------------------------------------------
+ */
+/*
+ * APF DNS name lists consist of one or more NUL-terminated TLV label sequences
+ * (where each label length is either 0xFF for a single-label '*' wildcard or
+ * 1..63 non-NUL bytes) followed by a final trailing NUL byte (0x00, 0x00 at
+ * the end of the list).
+ */
+static bool validate_dns_names(const uint8_t *names, uint16_t len) {
+    if (!names || len < 4 || names[len - 2] != 0 || names[len - 1] != 0) {
+        return false;
+    }
+    uint16_t i = 0;
+    while (i < len - 1) {
+        uint8_t label_len = names[i++];
+        if (label_len == 0xFF) {
+            continue;
+        }
+        if (label_len < 1 || label_len > 63) {
+            return false;
+        }
+        if (i + label_len >= len - 1) {
+            return false;
+        }
+        for (uint8_t j = 0; j < label_len; j++) {
+            if (names[i + j] == 0) {
+                return false;
+            }
+        }
+        i += label_len;
+        if (names[i] == 0) {
+            i++;
+        }
+    }
+    return i == (uint16_t)(len - 1);
+}
+
+static int add_dns_match_common(struct apf_generator *gen, enum apf_register reg,
+                                uint32_t ext_opcode, apf_label tgt_label,
+                                const uint8_t *hdr, uint32_t hdr_len,
+                                const uint8_t *names, uint16_t names_len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (!validate_dns_names(names, names_len) ||
+        !validate_and_track_target_label(gen, tgt_label)) {
+        return apf_gen_fail(gen);
+    }
+    uint32_t extra_len = hdr_len + names_len;
+    uint8_t *extra = malloc(extra_len);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    if (hdr_len > 0) {
+        memcpy(extra, hdr, hdr_len);
+    }
+    /*
+     * APF's interpreter compares DNS labels with `uppercase(w) == *needle++`,
+     * so normalize any lowercase ASCII characters ('a'..'z') in `names` to
+     * uppercase ('A'..'Z'). TLV label lengths (1..63), wildcards (0xFF), and
+     * NUL terminators (0x00) never overlap 'a'..'z' (0x61..0x7A).
+     */
+    for (uint16_t i = 0; i < names_len; i++) {
+        uint8_t c = names[i];
+        extra[hdr_len + i] = (c >= 'a' && c <= 'z') ? (uint8_t)(c - ('a' - 'A')) : c;
+    }
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, EXT_OPCODE, (uint8_t)reg);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = ext_opcode;
+    insn->has_target = true;
+    insn->target_label = tgt_label.id;
+    insn->extra_bytes = extra;
+    insn->extra_len = extra_len;
+    return 0;
+}
+
+int apf_gen_add_jdnsqne(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                        const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match_common(gen, APF_REG_R0, JDNSQMATCH_EXT_OPCODE, tgt_label,
+                                &qtype, 1, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeq(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                        const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match_common(gen, APF_REG_R1, JDNSQMATCH_EXT_OPCODE, tgt_label,
+                                &qtype, 1, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqnesafe(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                            const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match_common(gen, APF_REG_R0, JDNSQMATCHSAFE_EXT_OPCODE, tgt_label,
+                                &qtype, 1, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeqsafe(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                            const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match_common(gen, APF_REG_R1, JDNSQMATCHSAFE_EXT_OPCODE, tgt_label,
+                                &qtype, 1, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsane(struct apf_generator *gen, apf_label tgt_label,
+                        const uint8_t *names, uint16_t names_len) {
+    return add_dns_match_common(gen, APF_REG_R0, JDNSAMATCH_EXT_OPCODE, tgt_label,
+                                NULL, 0, names, names_len);
+}
+
+int apf_gen_add_jdnsaeq(struct apf_generator *gen, apf_label tgt_label,
+                        const uint8_t *names, uint16_t names_len) {
+    return add_dns_match_common(gen, APF_REG_R1, JDNSAMATCH_EXT_OPCODE, tgt_label,
+                                NULL, 0, names, names_len);
+}
+
+int apf_gen_add_jdnsanesafe(struct apf_generator *gen, apf_label tgt_label,
+                            const uint8_t *names, uint16_t names_len) {
+    return add_dns_match_common(gen, APF_REG_R0, JDNSAMATCHSAFE_EXT_OPCODE, tgt_label,
+                                NULL, 0, names, names_len);
+}
+
+int apf_gen_add_jdnsaeqsafe(struct apf_generator *gen, apf_label tgt_label,
+                            const uint8_t *names, uint16_t names_len) {
+    return add_dns_match_common(gen, APF_REG_R1, JDNSAMATCHSAFE_EXT_OPCODE, tgt_label,
+                                NULL, 0, names, names_len);
+}
+
+static int add_dns_match1(struct apf_generator *gen, enum apf_register reg,
+                          uint32_t ext_op, apf_label tgt_label, uint16_t qtype,
+                          const uint8_t *qnames, uint16_t qnames_len) {
+    uint8_t hdr[2] = {(uint8_t)((qtype >> 8) & 0xFF), (uint8_t)(qtype & 0xFF)};
+    return add_dns_match_common(gen, reg, ext_op, tgt_label, hdr, 2, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqne1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                         const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match1(gen, APF_REG_R0, JDNSQMATCH1_EXT_OPCODE, tgt_label,
+                          qtype, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeq1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                         const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match1(gen, APF_REG_R1, JDNSQMATCH1_EXT_OPCODE, tgt_label,
+                          qtype, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqnesafe1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                             const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match1(gen, APF_REG_R0, JDNSQMATCHSAFE1_EXT_OPCODE, tgt_label,
+                          qtype, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeqsafe1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                             const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match1(gen, APF_REG_R1, JDNSQMATCHSAFE1_EXT_OPCODE, tgt_label,
+                          qtype, qnames, qnames_len);
+}
+
+static int add_dns_match2(struct apf_generator *gen, enum apf_register reg,
+                          uint32_t ext_op, apf_label tgt_label, uint8_t qtype1,
+                          uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len) {
+    if (qtype1 == qtype2) {
+        return apf_gen_fail(gen);
+    }
+    uint8_t hdr[2] = {qtype1, qtype2};
+    return add_dns_match_common(gen, reg, ext_op, tgt_label, hdr, 2, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqne2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                         uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match2(gen, APF_REG_R0, JDNSQMATCH2_EXT_OPCODE, tgt_label,
+                          qtype1, qtype2, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeq2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                         uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match2(gen, APF_REG_R1, JDNSQMATCH2_EXT_OPCODE, tgt_label,
+                          qtype1, qtype2, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqnesafe2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                             uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match2(gen, APF_REG_R0, JDNSQMATCHSAFE2_EXT_OPCODE, tgt_label,
+                          qtype1, qtype2, qnames, qnames_len);
+}
+
+int apf_gen_add_jdnsqeqsafe2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                             uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len) {
+    return add_dns_match2(gen, APF_REG_R1, JDNSQMATCHSAFE2_EXT_OPCODE, tgt_label,
+                          qtype1, qtype2, qnames, qnames_len);
 }
 
 /*
@@ -609,6 +1109,303 @@ int apf_gen_add_stdw(struct apf_generator *gen, enum apf_register reg, uint16_t 
 
 /*
  * -------------------------------------------------------------------------
+ * Packet Construction and Transmission Instructions
+ * -------------------------------------------------------------------------
+ */
+int apf_gen_add_allocate_r0(struct apf_generator *gen) {
+    return apf_gen_add_ext_insn(gen, APF_REG_R0, ALLOCATE_EXT_OPCODE);
+}
+
+int apf_gen_add_allocate_ext(struct apf_generator *gen, uint16_t size) {
+    if (!apf_gen_check_mutable(gen)) return -1;
+    if (size == 0) return apf_gen_fail(gen);
+    uint8_t *extra = malloc(2);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    extra[0] = (uint8_t)((size >> 8) & 0xFF);
+    extra[1] = (uint8_t)(size & 0xFF);
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, EXT_OPCODE, APF_REG_R1);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = ALLOCATE_EXT_OPCODE;
+    insn->extra_bytes = extra;
+    insn->extra_len = 2;
+    return 0;
+}
+
+int apf_gen_add_allocate(struct apf_generator *gen, uint16_t size) {
+    if (!apf_gen_check_mutable(gen)) return -1;
+    if (size == 0) return apf_gen_fail(gen);
+    /*
+     * Compact APFv6.1 ALLOC_XMIT (R=1) allocates 266 + 8 * imm bytes
+     * (with len_field == 0 allocating the 266-byte minimum buffer).
+     */
+    uint32_t imm = (size > 266) ? (((uint32_t)size - 266 + 7) / 8) : 0;
+    struct apf_instruction *insn = apf_gen_add_insn(gen, ALLOC_XMIT_OPCODE, APF_REG_R1);
+    if (!insn) return -1;
+    insn->has_imm = (imm > 0);
+    insn->imm = imm;
+    return 0;
+}
+
+int apf_gen_add_transmit_without_csum(struct apf_generator *gen) {
+    return apf_gen_add_reg_insn(gen, ALLOC_XMIT_OPCODE, APF_REG_R0);
+}
+
+int apf_gen_add_transmit(struct apf_generator *gen, uint8_t ip_ofs) {
+    if (!apf_gen_check_mutable(gen)) return -1;
+    if (ip_ofs == 255) return apf_gen_fail(gen);
+
+    uint8_t *extra = malloc(2);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    extra[0] = ip_ofs;
+    /* csum_ofs == 255 signals no L4 checksum offload (omits trailing 3 bytes). */
+    extra[1] = 255;
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, EXT_OPCODE, APF_REG_R0);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = TRANSMIT_EXT_OPCODE;
+    insn->extra_bytes = extra;
+    insn->extra_len = 2;
+    return 0;
+}
+
+int apf_gen_add_transmit_l4(struct apf_generator *gen, uint8_t ip_ofs,
+                            uint8_t csum_ofs, uint8_t csum_start,
+                            uint16_t partial_csum, bool is_udp) {
+    /*
+     * APFv6.1 ALLOC_XMIT (R=0, len_field > 0) provides 8 compact templates
+     * for Ethernet (ip_ofs == 14) L4 checksummed transmissions, encoding
+     * imm = (partial_csum << 3) | template_idx. Only template indices 0
+     * (IPv4/UDP) and 4 (IPv6/UDP) apply UDP checksum semantics (0x0000 -> 0xFFFF).
+     */
+    static const uint8_t k_auto_csum_start[8] = {26, 26, 34, 38, 22, 22, 22, 22};
+    static const uint8_t k_auto_csum_ofs[8] = {40, 44, 36, 40, 60, 64, 56, 64};
+
+    if (!apf_gen_check_mutable(gen)) return -1;
+    if (ip_ofs == 255 || csum_ofs == 255) return apf_gen_fail(gen);
+
+    if (ip_ofs == 14) {
+        for (uint32_t v = 0; v < 8; v++) {
+            bool tmpl_udp = !(v & 3);
+            if (k_auto_csum_ofs[v] == csum_ofs && k_auto_csum_start[v] == csum_start &&
+                tmpl_udp == is_udp) {
+                uint32_t imm = ((uint32_t)partial_csum << 3) | v;
+                return apf_gen_add_imm_insn(gen, ALLOC_XMIT_OPCODE, APF_REG_R0, imm);
+            }
+        }
+    }
+
+    uint8_t *extra = malloc(5);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    extra[0] = ip_ofs;
+    extra[1] = csum_ofs;
+    extra[2] = csum_start;
+    extra[3] = (uint8_t)((partial_csum >> 8) & 0xFF);
+    extra[4] = (uint8_t)(partial_csum & 0xFF);
+
+    /* In TRANSMIT_EXT_OPCODE (37), R=1 selects UDP checksum rules (0x0000 -> 0xFFFF). */
+    struct apf_instruction *insn =
+        apf_gen_add_insn(gen, EXT_OPCODE, is_udp ? APF_REG_R1 : APF_REG_R0);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = TRANSMIT_EXT_OPCODE;
+    insn->extra_bytes = extra;
+    insn->extra_len = 5;
+    return 0;
+}
+
+static int apf_gen_add_write_insn(struct apf_generator *gen, uint32_t val, uint8_t size) {
+    struct apf_instruction *insn = apf_gen_add_insn(gen, WRITE_OPCODE, APF_REG_R0);
+    if (!insn) return -1;
+    insn->has_imm = true;
+    insn->imm = val;
+    insn->write_size = size;
+    return 0;
+}
+
+int apf_gen_add_write_u8(struct apf_generator *gen, uint8_t val) {
+    return apf_gen_add_write_insn(gen, val, 1);
+}
+
+int apf_gen_add_write_u16(struct apf_generator *gen, uint16_t val) {
+    return apf_gen_add_write_insn(gen, val, 2);
+}
+
+int apf_gen_add_write_u32(struct apf_generator *gen, uint32_t val) {
+    return apf_gen_add_write_insn(gen, val, 4);
+}
+
+int apf_gen_add_ewrite1(struct apf_generator *gen, enum apf_register reg) {
+    return apf_gen_add_ext_insn(gen, reg, EWRITE1_EXT_OPCODE);
+}
+
+int apf_gen_add_ewrite2(struct apf_generator *gen, enum apf_register reg) {
+    return apf_gen_add_ext_insn(gen, reg, EWRITE2_EXT_OPCODE);
+}
+
+int apf_gen_add_ewrite4(struct apf_generator *gen, enum apf_register reg) {
+    return apf_gen_add_ext_insn(gen, reg, EWRITE4_EXT_OPCODE);
+}
+
+int apf_gen_find_or_append_data(struct apf_generator *gen, const uint8_t *data, size_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (!data || len == 0 || len > 0xFFFF) {
+        return apf_gen_fail(gen);
+    }
+    int rel_ofs = find_or_append_data_bytes(gen, data, (uint32_t)len, false);
+    if (rel_ofs < 0) {
+        return -1;
+    }
+    /* Offset 3 skips the 3-byte JMPDATA header (1-byte opcode + 2-byte length). */
+    return 3 + rel_ofs;
+}
+
+static int apf_gen_add_pkt_data_copy_insn(struct apf_generator *gen, enum apf_register reg,
+                                          uint32_t src_offset, uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (len == 0 || len > 511) {
+        return apf_gen_fail(gen);
+    }
+    /*
+     * Copy length is encoded in 1 byte for 1..255, or in 2 bytes as
+     * (0x00, len - 256) when 256 <= len <= 511 (APFv6.1+).
+     */
+    uint32_t extra_len = (len > 255) ? 2 : 1;
+    uint8_t *extra = malloc(extra_len);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    if (len <= 255) {
+        extra[0] = (uint8_t)len;
+    } else {
+        extra[0] = 0;
+        extra[1] = (uint8_t)(len - 256);
+    }
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, PKTDATACOPY_OPCODE, (uint8_t)reg);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = src_offset;
+    insn->extra_bytes = extra;
+    insn->extra_len = extra_len;
+    return 0;
+}
+
+int apf_gen_add_pktcopy(struct apf_generator *gen, uint32_t src_offset, uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (src_offset > (uint32_t)INT32_MAX) {
+        return apf_gen_fail(gen);
+    }
+    return apf_gen_add_pkt_data_copy_insn(gen, APF_REG_R0, src_offset, len);
+}
+
+int apf_gen_add_datacopy(struct apf_generator *gen, uint32_t src_offset, uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (len == 0 || len > 511 || gen->count < PROLOGUE_INSN_COUNT || src_offset < 3 ||
+        (uint64_t)(src_offset - 3) + (uint64_t)len > (uint64_t)gen->insns[0].extra_len) {
+        return apf_gen_fail(gen);
+    }
+    return apf_gen_add_pkt_data_copy_insn(gen, APF_REG_R1, src_offset, len);
+}
+
+int apf_gen_add_data_copy(struct apf_generator *gen, const uint8_t *data, size_t len) {
+    if (!apf_gen_check_mutable(gen)) return -1;
+    if (!data || len == 0 || gen->count < PROLOGUE_INSN_COUNT) return apf_gen_fail(gen);
+    size_t saved_count = gen->count;
+    uint32_t saved_data_size = gen->insns[0].extra_len;
+    bool was_ok = (gen->err == APF_GEN_OK);
+    for (size_t offset = 0; offset < len; offset += 511) {
+        size_t rem = len - offset;
+        uint16_t chunk_len = (rem > 511) ? 511 : (uint16_t)rem;
+        int copy_src = apf_gen_find_or_append_data(gen, data + offset, chunk_len);
+        if (copy_src < 0 ||
+            apf_gen_add_datacopy(gen, (uint32_t)copy_src, chunk_len) < 0) {
+            for (size_t i = saved_count; i < gen->count; i++) {
+                free(gen->insns[i].extra_bytes);
+                gen->insns[i].extra_bytes = NULL;
+                gen->insns[i].extra_len = 0;
+            }
+            gen->count = saved_count;
+            gen->insns[0].extra_len = saved_data_size;
+            gen->insns[0].imm = saved_data_size;
+            if (was_ok && gen->err != APF_GEN_OK) {
+                gen->err_insn_index =
+                    (saved_count >= PROLOGUE_INSN_COUNT) ? (saved_count - PROLOGUE_INSN_COUNT) : 0;
+            }
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int apf_gen_add_epktcopy_imm_insn(struct apf_generator *gen, enum apf_register reg,
+                                         uint16_t len) {
+    if (!apf_gen_check_mutable(gen)) {
+        return -1;
+    }
+    if (len == 0 || len > 511) {
+        return apf_gen_fail(gen);
+    }
+    uint32_t extra_len = (len > 255) ? 2 : 1;
+    uint8_t *extra = malloc(extra_len);
+    if (!extra) return apf_gen_fail_with(gen, APF_GEN_ERR_OUT_OF_MEMORY);
+    if (len <= 255) {
+        extra[0] = (uint8_t)len;
+    } else {
+        extra[0] = 0;
+        extra[1] = (uint8_t)(len - 256);
+    }
+
+    struct apf_instruction *insn = apf_gen_add_insn(gen, EXT_OPCODE, (uint8_t)reg);
+    if (!insn) {
+        free(extra);
+        return -1;
+    }
+    insn->has_imm = true;
+    insn->imm = EPKTDATACOPYIMM_EXT_OPCODE;
+    insn->extra_bytes = extra;
+    insn->extra_len = extra_len;
+    return 0;
+}
+
+int apf_gen_add_epktcopy(struct apf_generator *gen, uint16_t len) {
+    return apf_gen_add_epktcopy_imm_insn(gen, APF_REG_R0, len);
+}
+
+int apf_gen_add_edatacopy(struct apf_generator *gen, uint16_t len) {
+    return apf_gen_add_epktcopy_imm_insn(gen, APF_REG_R1, len);
+}
+
+int apf_gen_add_epktcopy_r1(struct apf_generator *gen) {
+    return apf_gen_add_ext_insn(gen, APF_REG_R0, EPKTDATACOPYR1_EXT_OPCODE);
+}
+
+int apf_gen_add_edatacopy_r1(struct apf_generator *gen) {
+    return apf_gen_add_ext_insn(gen, APF_REG_R1, EPKTDATACOPYR1_EXT_OPCODE);
+}
+
+/*
+ * -------------------------------------------------------------------------
  * Terminal Verdict Instructions
  * -------------------------------------------------------------------------
  */
@@ -647,6 +1444,8 @@ int apf_gen_add_cnt_and_drop(struct apf_generator *gen, uint16_t cnt) {
  * For EXT_OPCODE, although the interpreter decodes len_field == 0 as imm == 0
  * (LDM_EXT_OPCODE for slot M[0]), the generator always emits at least 1 byte
  * for the extended sub-opcode to keep EXT instruction encoding uniform.
+ * ALLOC_XMIT_OPCODE reserves len_field == 0 for the 1-byte no-checksum
+ * transmit (R=0) and 266-byte allocate (R=1) forms.
  */
 static bool opcode_allows_zero_len_imm(uint8_t opcode) {
     switch (opcode) {
@@ -657,6 +1456,7 @@ static bool opcode_allows_zero_len_imm(uint8_t opcode) {
         case OR_OPCODE:
         case SH_OPCODE:
         case EXT_OPCODE:
+        case ALLOC_XMIT_OPCODE:
             return false;
         default:
             return true;
@@ -720,6 +1520,15 @@ static uint8_t get_insn_operand_sizes(const struct apf_instruction *insn,
         *out_imm_size = 2;
         *out_target_size = 0;
         return 2;
+    }
+    /*
+     * WRITE_OPCODE encodes the explicit write width (1, 2, or 4 bytes) in
+     * len_field rather than shrinking the immediate value.
+     */
+    if (insn->opcode == WRITE_OPCODE) {
+        *out_imm_size = insn->write_size;
+        *out_target_size = 0;
+        return insn->write_size;
     }
 
     uint8_t imm_size = 0;
