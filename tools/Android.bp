@@ -17,3 +17,9 @@ cc_binary {
     srcs: ["apf_tool.c"],
     shared_libs: ["libnl"],
 }
+
+cc_binary {
+    name: "apf_tool_nl80211",
+    srcs: ["apf_tool_nl80211.c"],
+    shared_libs: ["libnl"],
+}
