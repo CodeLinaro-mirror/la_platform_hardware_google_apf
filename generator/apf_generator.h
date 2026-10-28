@@ -82,8 +82,9 @@ enum {
 /*
  * Opaque handle for an APF bytecode generator instance.
  *
- * Builder functions return 0 on success and -1 on error. Errors are sticky and
- * can be queried with apf_gen_get_error(). Adding instructions or labels after
+ * Builder functions return 0 on success (or a non-negative data offset for
+ * apf_gen_find_or_append_data) and -1 on error. Errors are sticky and can be
+ * queried with apf_gen_get_error(). Adding instructions or labels after
  * apf_gen_generate() has been called is forbidden.
  */
 struct apf_generator;
@@ -117,10 +118,78 @@ int apf_gen_add_jlt(struct apf_generator *gen, uint32_t val, apf_label tgt_label
 int apf_gen_add_jlt_r1(struct apf_generator *gen, apf_label tgt_label);
 int apf_gen_add_jset(struct apf_generator *gen, uint32_t val, apf_label tgt_label);
 int apf_gen_add_jset_r1(struct apf_generator *gen, apf_label tgt_label);
+int apf_gen_add_jnset(struct apf_generator *gen, uint32_t val, apf_label tgt_label);
+int apf_gen_add_jnset_r1(struct apf_generator *gen, apf_label tgt_label);
+/*
+ * Byte-sequence matching starting at the packet offset in R0.
+ */
 int apf_gen_add_jbsne(struct apf_generator *gen, apf_label tgt_label, const uint8_t *bytes,
                       uint16_t len);
 int apf_gen_add_jbseq(struct apf_generator *gen, apf_label tgt_label, const uint8_t *bytes,
                       uint16_t len);
+int apf_gen_add_jbsne_multi(struct apf_generator *gen, apf_label tgt_label, const uint8_t *bytes,
+                            uint8_t cnt, uint16_t len);
+int apf_gen_add_jbseq_multi(struct apf_generator *gen, apf_label tgt_label, const uint8_t *bytes,
+                            uint8_t cnt, uint16_t len);
+/*
+ * Byte-sequence matching at a fixed packet offset. Emits compact JBSPTRMATCH
+ * when pkt_offset <= 255, cnt <= 16, len <= 16, and all patterns fit at even
+ * offsets <= 510 in the JMPDATA region; otherwise falls back to
+ * `li r0, pkt_offset` + JBSMATCH. Callers must assume R0 may be overwritten.
+ */
+int apf_gen_add_jbsne_at_offset(struct apf_generator *gen, uint32_t pkt_offset, apf_label tgt_label,
+                                const uint8_t *bytes, uint16_t len);
+int apf_gen_add_jbseq_at_offset(struct apf_generator *gen, uint32_t pkt_offset, apf_label tgt_label,
+                                const uint8_t *bytes, uint16_t len);
+int apf_gen_add_jbsne_at_offset_multi(struct apf_generator *gen, uint32_t pkt_offset,
+                                      apf_label tgt_label, const uint8_t *bytes, uint8_t cnt,
+                                      uint16_t len);
+int apf_gen_add_jbseq_at_offset_multi(struct apf_generator *gen, uint32_t pkt_offset,
+                                      apf_label tgt_label, const uint8_t *bytes, uint8_t cnt,
+                                      uint16_t len);
+int apf_gen_add_joneof(struct apf_generator *gen, enum apf_register reg, apf_label tgt_label,
+                       const uint32_t *values, uint8_t cnt);
+int apf_gen_add_jnoneof(struct apf_generator *gen, enum apf_register reg, apf_label tgt_label,
+                        const uint32_t *values, uint8_t cnt);
+
+/*
+ * DNS Matching Instructions (all read the UDP payload start offset from R0).
+ */
+int apf_gen_add_jdnsqne(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                        const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeq(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                        const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqnesafe(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                            const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeqsafe(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype,
+                            const uint8_t *qnames, uint16_t qnames_len);
+
+int apf_gen_add_jdnsane(struct apf_generator *gen, apf_label tgt_label, const uint8_t *names,
+                        uint16_t names_len);
+int apf_gen_add_jdnsaeq(struct apf_generator *gen, apf_label tgt_label, const uint8_t *names,
+                        uint16_t names_len);
+int apf_gen_add_jdnsanesafe(struct apf_generator *gen, apf_label tgt_label, const uint8_t *names,
+                            uint16_t names_len);
+int apf_gen_add_jdnsaeqsafe(struct apf_generator *gen, apf_label tgt_label, const uint8_t *names,
+                            uint16_t names_len);
+
+int apf_gen_add_jdnsqne1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                         const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeq1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                         const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqnesafe1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                             const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeqsafe1(struct apf_generator *gen, apf_label tgt_label, uint16_t qtype,
+                             const uint8_t *qnames, uint16_t qnames_len);
+
+int apf_gen_add_jdnsqne2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                         uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeq2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                         uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqnesafe2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                             uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len);
+int apf_gen_add_jdnsqeqsafe2(struct apf_generator *gen, apf_label tgt_label, uint8_t qtype1,
+                             uint8_t qtype2, const uint8_t *qnames, uint16_t qnames_len);
 
 /* Arithmetic and Immediate Instructions */
 int apf_gen_add_add(struct apf_generator *gen, enum apf_register reg, int32_t val);
@@ -148,6 +217,35 @@ int apf_gen_add_mov(struct apf_generator *gen, enum apf_register dst_reg);
 
 int apf_gen_add_lddw(struct apf_generator *gen, enum apf_register reg, uint16_t cnt);
 int apf_gen_add_stdw(struct apf_generator *gen, enum apf_register reg, uint16_t cnt);
+
+/* Packet Construction and Transmission Instructions */
+/* Allocates a transmit buffer of size R0 bytes. */
+int apf_gen_add_allocate_r0(struct apf_generator *gen);
+int apf_gen_add_allocate(struct apf_generator *gen, uint16_t size);
+int apf_gen_add_allocate_ext(struct apf_generator *gen, uint16_t size);
+int apf_gen_add_transmit_without_csum(struct apf_generator *gen);
+int apf_gen_add_transmit(struct apf_generator *gen, uint8_t ip_ofs);
+int apf_gen_add_transmit_l4(struct apf_generator *gen, uint8_t ip_ofs, uint8_t csum_ofs,
+                            uint8_t csum_start, uint16_t partial_csum, bool is_udp);
+int apf_gen_add_write_u8(struct apf_generator *gen, uint8_t val);
+int apf_gen_add_write_u16(struct apf_generator *gen, uint16_t val);
+int apf_gen_add_write_u32(struct apf_generator *gen, uint32_t val);
+int apf_gen_add_ewrite1(struct apf_generator *gen, enum apf_register reg);
+int apf_gen_add_ewrite2(struct apf_generator *gen, enum apf_register reg);
+int apf_gen_add_ewrite4(struct apf_generator *gen, enum apf_register reg);
+int apf_gen_find_or_append_data(struct apf_generator *gen, const uint8_t *data, size_t len);
+int apf_gen_add_data_copy(struct apf_generator *gen, const uint8_t *data, size_t len);
+int apf_gen_add_pktcopy(struct apf_generator *gen, uint32_t src_offset, uint16_t len);
+int apf_gen_add_datacopy(struct apf_generator *gen, uint32_t src_offset, uint16_t len);
+/*
+ * Extended packet/data copy instructions: read the source offset from R0
+ * (packet offset for epktcopy*, JMPDATA offset for edatacopy*); the *_r1
+ * variants also read the copy length in bytes from R1.
+ */
+int apf_gen_add_epktcopy(struct apf_generator *gen, uint16_t len);
+int apf_gen_add_edatacopy(struct apf_generator *gen, uint16_t len);
+int apf_gen_add_epktcopy_r1(struct apf_generator *gen);
+int apf_gen_add_edatacopy_r1(struct apf_generator *gen);
 
 /* Terminal Verdict Instructions */
 int apf_gen_add_pass(struct apf_generator *gen);

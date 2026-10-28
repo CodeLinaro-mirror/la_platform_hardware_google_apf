@@ -576,6 +576,613 @@ TEST(ApfGeneratorTest, testArithmeticLoadsAndMemoryInstructions) {
     }
 }
 
+TEST(ApfGeneratorTest, testPacketTransmitAndRegisterInstructions) {
+    // 1. Test APFv6.1 ALLOC_XMIT (R=1): allocate(266) -> 1 byte,
+    //    allocate(267) -> rounds up to 274, allocate(300) -> 2 bytes (306),
+    //    allocate_r0, and allocate_ext(512)
+    {
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        apf_gen_add_allocate(gen.get(), 266);
+        apf_gen_add_allocate(gen.get(), 267);
+        apf_gen_add_allocate(gen.get(), 300);
+        apf_gen_add_allocate_r0(gen.get());
+        apf_gen_add_allocate_ext(gen.get(), 512);
+        size_t len = 0;
+        auto buf = GenerateProgram(gen.get(), &len);
+        ASSERT_NE(buf, nullptr);
+        ASSERT_EQ(len, 18u);
+        EXPECT_EQ(DisassembleProgram(buf.get(), len),
+                  (std::vector<std::string>{
+                      "0: data        0,",
+                      "3: debugbuf    size=4054",
+                      "7: allocate    (266)",
+                      "8: allocate    (274)",
+                      "10: allocate    (306)",
+                      "12: allocate    r0",
+                      "14: allocate    512",
+                  }));
+    }
+
+    // 2. Test APFv6.1 transmit_without_csum() -> 1-byte ALLOC_XMIT (R=0, imm=0),
+    //    transmit(14) -> 4-byte TRANSMIT_EXT_OPCODE (ip_ofs=14, csum_ofs=255),
+    //    transmit_l4(14, 40, 26, 17, true) -> 2-byte ALLOC_XMIT (R=0),
+    //    transmit_l4(14, 40, 26, 0, true) -> 2-byte ALLOC_XMIT with partial_csum=0x0,
+    //    and transmit_l4(14, 40, 26, 0, false) -> extended TRANSMIT when is_udp mismatches
+    {
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        apf_gen_add_transmit_without_csum(gen.get());
+        apf_gen_add_transmit(gen.get(), 14);
+        apf_gen_add_transmit_l4(gen.get(), 14, 40, 26, 17, true);
+        apf_gen_add_transmit_l4(gen.get(), 14, 40, 26, 0, true);
+        apf_gen_add_transmit_l4(gen.get(), 14, 40, 26, 0, false);
+        // Fallback to TRANSMIT_EXT_OPCODE when template does not match
+        apf_gen_add_transmit_l4(gen.get(), 18, 44, 30, 0x1234, false);
+        size_t len = 0;
+        auto buf = GenerateProgram(gen.get(), &len);
+        ASSERT_NE(buf, nullptr);
+        ASSERT_EQ(len, 30u);
+        EXPECT_EQ(DisassembleProgram(buf.get(), len),
+                  (std::vector<std::string>{
+                      "0: data        0,",
+                      "3: debugbuf    size=4042",
+                      "7: transmit",
+                      "8: transmit    ip_ofs=14",
+                      "12: transmitudp offload=ipv4/udp, partial_csum=0x11",
+                      "14: transmitudp offload=ipv4/udp, partial_csum=0x0",
+                      "16: transmit    ip_ofs=14, csum_ofs=40, csum_start=26, partial_csum=0x0000",
+                      "23: transmit    ip_ofs=18, csum_ofs=44, csum_start=30, partial_csum=0x1234",
+                  }));
+    }
+
+    // 3. Test WRITE, EWRITE, PKTCOPY/DATACOPY, EPKTCOPY/EDATACOPY (including boundary lengths
+    //    255, 256, and 511), and _R1 variants
+    {
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        const uint8_t init_data[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+        apf_gen_set_data(gen.get(), init_data, sizeof(init_data));
+        apf_gen_add_write_u8(gen.get(), 0xAA);
+        apf_gen_add_write_u16(gen.get(), 0xBBCC);
+        apf_gen_add_write_u32(gen.get(), 0x11223344);
+        apf_gen_add_pktcopy(gen.get(), 0, 14);
+        apf_gen_add_pktcopy(gen.get(), 0, 255);
+        apf_gen_add_pktcopy(gen.get(), 0, 256);
+        apf_gen_add_pktcopy(gen.get(), 0, 511);
+        apf_gen_add_pktcopy(gen.get(), 10, 300);
+        apf_gen_add_datacopy(gen.get(), 3, 4);
+        apf_gen_add_epktcopy(gen.get(), 255);
+        apf_gen_add_epktcopy(gen.get(), 256);
+        apf_gen_add_epktcopy(gen.get(), 300);
+        apf_gen_add_epktcopy(gen.get(), 511);
+        apf_gen_add_edatacopy(gen.get(), 16);
+        apf_gen_add_edatacopy(gen.get(), 255);
+        apf_gen_add_edatacopy(gen.get(), 256);
+        apf_gen_add_edatacopy(gen.get(), 511);
+        apf_gen_add_epktcopy_r1(gen.get());
+        apf_gen_add_edatacopy_r1(gen.get());
+        apf_gen_add_ewrite1(gen.get(), APF_REG_R0);
+        apf_gen_add_ewrite2(gen.get(), APF_REG_R0);
+        apf_gen_add_ewrite4(gen.get(), APF_REG_R1);
+        size_t len = 0;
+        auto buf = GenerateProgram(gen.get(), &len);
+        ASSERT_NE(buf, nullptr);
+        EXPECT_EQ(len, apf_gen_get_program_len(gen.get()));
+        EXPECT_EQ(DisassembleProgram(buf.get(), len),
+                  (std::vector<std::string>{
+                      "0: data        4, deadbeef",
+                      "7: debugbuf    size=3995",
+                      "11: write       0xaa",
+                      "13: write       0xbbcc",
+                      "16: write       0x11223344",
+                      "21: pktcopy     src=0, len=14",
+                      "23: pktcopy     src=0, len=255",
+                      "25: pktcopy     src=0, len=256",
+                      "28: pktcopy     src=0, len=511",
+                      "31: pktcopy     src=10, len=300",
+                      "35: datacopy    src=3, (4)deadbeef",
+                      "38: epktcopy    src=r0, len=255",
+                      "41: epktcopy    src=r0, len=256",
+                      "45: epktcopy    src=r0, len=300",
+                      "49: epktcopy    src=r0, len=511",
+                      "53: edatacopy   src=r0, len=16",
+                      "56: edatacopy   src=r0, len=255",
+                      "59: edatacopy   src=r0, len=256",
+                      "63: edatacopy   src=r0, len=511",
+                      "67: epktcopy    src=r0, len=r1",
+                      "69: edatacopy   src=r0, len=r1",
+                      "71: ewrite1     r0",
+                      "73: ewrite2     r0",
+                      "75: ewrite4     r1",
+                  }));
+
+        auto err_gen = AllocGen();
+        ASSERT_NE(err_gen, nullptr);
+        EXPECT_EQ(apf_gen_add_allocate(err_gen.get(), 0), -1);
+        EXPECT_EQ(apf_gen_add_allocate_ext(err_gen.get(), 0), -1);
+        EXPECT_EQ(apf_gen_add_transmit(err_gen.get(), 255), -1);
+        EXPECT_EQ(apf_gen_add_transmit_l4(err_gen.get(), 255, 40, 26, 0, true), -1);
+        EXPECT_EQ(apf_gen_add_transmit_l4(err_gen.get(), 14, 255, 26, 0, true), -1);
+        EXPECT_EQ(apf_gen_add_pktcopy(err_gen.get(), 0, 0), -1);
+        EXPECT_EQ(apf_gen_add_pktcopy(err_gen.get(), 0, 512), -1);
+        EXPECT_EQ(apf_gen_add_pktcopy(err_gen.get(), 0x80000000u, 14), -1);
+        EXPECT_EQ(apf_gen_add_datacopy(err_gen.get(), 0, 0), -1);
+        EXPECT_EQ(apf_gen_add_datacopy(err_gen.get(), 2, 1), -1);
+        EXPECT_EQ(apf_gen_add_datacopy(err_gen.get(), 3, 1), -1);
+        EXPECT_EQ(apf_gen_add_epktcopy(err_gen.get(), 0), -1);
+        EXPECT_EQ(apf_gen_add_edatacopy(err_gen.get(), 512), -1);
+        size_t err_len = 0;
+        EXPECT_EQ(GenerateProgram(err_gen.get(), &err_len), nullptr);
+    }
+}
+
+TEST(ApfGeneratorTest, testJbsPtrMatchAndDataDeduplication) {
+    const uint8_t target_mac[6] = {0x50, 0x6F, 0x9A, 0x01, 0x02, 0x03};
+
+    auto gen = AllocGen();
+    ASSERT_NE(gen, nullptr);
+    apf_label lbl_drop = apf_gen_alloc_label(gen.get());
+    ASSERT_EQ(lbl_drop.id, -2);
+    // Match target_mac at destination MAC (offset 0) AND source MAC (offset 6).
+    // Both calls reference the same 6-byte MAC; find_or_append_data_bytes
+    // deduplicates it to 1 copy in JMPDATA.
+    apf_gen_add_jbseq_at_offset(gen.get(), 0, lbl_drop, target_mac, sizeof(target_mac));
+    apf_gen_add_jbsne_at_offset(gen.get(), 6, lbl_drop, target_mac, sizeof(target_mac));
+    apf_gen_add_pass(gen.get());
+    apf_gen_define_label(gen.get(), lbl_drop);
+    apf_gen_add_drop(gen.get());
+
+    size_t len = 0;
+    auto buf = GenerateProgram(gen.get(), &len);
+    ASSERT_NE(buf, nullptr);
+    ASSERT_EQ(len, 25u);
+    EXPECT_EQ(DisassembleProgram(buf.get(), len),
+              (std::vector<std::string>{
+                  "0: data        6, 506f9a010203",
+                  "9: debugbuf    size=4047",
+                  "13: jbsptreq    pktofs=0, (6), 24, @0[506f9a010203]",
+                  "18: jbsptrne    pktofs=6, (6), 24, @0[506f9a010203]",
+                  "23: pass",
+                  "24: drop",
+              }));
+
+    // When JMPDATA already exceeds 510 bytes, JBSPTRMATCH gracefully falls back
+    // to LI + JBSMATCH without latching APF_GEN_ERR_DATA_OVERFLOW.
+    auto fallback_gen = AllocGen();
+    ASSERT_NE(fallback_gen, nullptr);
+    const std::vector<uint8_t> init_pool(512, 0xAA);
+    ASSERT_EQ(apf_gen_set_data(fallback_gen.get(), init_pool.data(), init_pool.size()), 0);
+    EXPECT_EQ(apf_gen_add_jbseq_at_offset(fallback_gen.get(), 0, APF_LABEL_DROP, target_mac,
+                                          sizeof(target_mac)),
+              0);
+    EXPECT_EQ(apf_gen_get_error(fallback_gen.get(), nullptr), APF_GEN_OK);
+    EXPECT_EQ(apf_gen_get_insn_count(fallback_gen.get()), 2u);
+    size_t fb_len = 0;
+    auto fb_buf = GenerateProgram(fallback_gen.get(), &fb_len);
+    ASSERT_NE(fb_buf, nullptr);
+
+    // Fallback to LI + JBSMATCH when pkt_offset > 255 (256), len > 16 (17), or cnt > 16 (17)
+    {
+        auto fb_bounds_gen = AllocGen();
+        ASSERT_NE(fb_bounds_gen, nullptr);
+        const std::vector<uint8_t> pat17(17, 0x11);
+        uint8_t cnt17_bytes[17];
+        for (uint8_t i = 0; i < 17; i++) cnt17_bytes[i] = i;
+        EXPECT_EQ(apf_gen_add_jbseq_at_offset(fb_bounds_gen.get(), 256, APF_LABEL_DROP, target_mac,
+                                              sizeof(target_mac)),
+                  0);
+        EXPECT_EQ(apf_gen_add_jbsne_at_offset(fb_bounds_gen.get(), 0, APF_LABEL_DROP, pat17.data(),
+                                              17),
+                  0);
+        EXPECT_EQ(apf_gen_add_jbseq_at_offset_multi(fb_bounds_gen.get(), 10, APF_LABEL_PASS,
+                                                    cnt17_bytes, 17, 1),
+                  0);
+        size_t b_len = 0;
+        auto b_buf = GenerateProgram(fb_bounds_gen.get(), &b_len);
+        ASSERT_NE(b_buf, nullptr);
+        EXPECT_EQ(
+            DisassembleProgram(b_buf.get(), b_len),
+            (std::vector<std::string>{
+                "0: data        0,",
+                "3: debugbuf    size=4008",
+                "7: li          r0, 256",
+                "10: jbseq       r0, (6), DROP, 506f9a010203",
+                "19: li          r0, 0",
+                "20: jbsne       r0, (17), DROP, 1111111111111111111111111111111111",
+                "40: li          r0, 10",
+                "42: jbseq       r0, (1), PASS, "
+                "{ 00, 01, 02, 03, 04, 05, 06, 07, 08, 09, 0a, 0b, 0c, 0d, 0e, 0f, 10 }[17]",
+            }));
+    }
+
+    // Odd-length JMPDATA pads 1 zero byte so JBSPTRMATCH pattern lands at even offset (@6)
+    {
+        auto odd_gen = AllocGen();
+        ASSERT_NE(odd_gen, nullptr);
+        const uint8_t odd5[5] = {0x01, 0x02, 0x03, 0x04, 0x05};
+        ASSERT_EQ(apf_gen_set_data(odd_gen.get(), odd5, sizeof(odd5)), 0);
+        ASSERT_EQ(apf_gen_add_jbseq_at_offset(odd_gen.get(), 0, APF_LABEL_DROP, target_mac,
+                                              sizeof(target_mac)),
+                  0);
+        size_t odd_len = 0;
+        auto odd_buf = GenerateProgram(odd_gen.get(), &odd_len);
+        ASSERT_NE(odd_buf, nullptr);
+        EXPECT_EQ(DisassembleProgram(odd_buf.get(), odd_len),
+                  (std::vector<std::string>{
+                      "0: data        12, 010203040500506f9a010203",
+                      "15: debugbuf    size=4048",
+                      "19: jbsptreq    pktofs=0, (6), DROP, @6[506f9a010203]",
+                  }));
+    }
+
+    // Pattern placed at exact max even offset 510 still uses JBSPTRMATCH (@510)
+    {
+        auto gen510 = AllocGen();
+        ASSERT_NE(gen510, nullptr);
+        const std::vector<uint8_t> pool510(510, 0xAA);
+        ASSERT_EQ(apf_gen_set_data(gen510.get(), pool510.data(), pool510.size()), 0);
+        ASSERT_EQ(apf_gen_add_jbseq_at_offset(gen510.get(), 0, APF_LABEL_DROP, target_mac,
+                                              sizeof(target_mac)),
+                  0);
+        size_t len510 = 0;
+        auto buf510 = GenerateProgram(gen510.get(), &len510);
+        ASSERT_NE(buf510, nullptr);
+        std::vector<std::string> disas510 = DisassembleProgram(buf510.get(), len510);
+        ASSERT_EQ(disas510.size(), 3u);
+        EXPECT_EQ(disas510[2], "523: jbsptreq    pktofs=0, (6), DROP, @510[506f9a010203]");
+    }
+
+    // Multi-pattern call where 1st pattern fits at 508 but 2nd lands at 512 falls back
+    // entirely to LI + JBSMATCH and restores JMPDATA length to 508
+    {
+        auto gen508 = AllocGen();
+        ASSERT_NE(gen508, nullptr);
+        const std::vector<uint8_t> pool508(508, 0xAA);
+        ASSERT_EQ(apf_gen_set_data(gen508.get(), pool508.data(), pool508.size()), 0);
+        const uint8_t two_pats[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+        ASSERT_EQ(apf_gen_add_jbsne_at_offset_multi(gen508.get(), 0, APF_LABEL_DROP, two_pats, 2,
+                                                    4),
+                  0);
+        size_t len508 = 0;
+        auto buf508 = GenerateProgram(gen508.get(), &len508);
+        ASSERT_NE(buf508, nullptr);
+        std::vector<std::string> disas508 = DisassembleProgram(buf508.get(), len508);
+        ASSERT_EQ(disas508.size(), 4u);
+        EXPECT_EQ(disas508[0], "0: data        508, " + std::string(508 * 2, 'a'));
+        EXPECT_EQ(disas508[2], "515: li          r0, 0");
+        EXPECT_EQ(disas508[3], "516: jbsne       r0, (4), DROP, { 11223344, 55667788 }[2]");
+    }
+
+    // Invalid cnt/len or duplicate patterns fail upfront without emitting a dangling LI R0
+    auto err_gen = AllocGen();
+    ASSERT_NE(err_gen, nullptr);
+    const std::vector<uint8_t> oversize_pattern(2048, 0x11);
+    EXPECT_EQ(apf_gen_add_jbsne_at_offset(err_gen.get(), 300, APF_LABEL_DROP,
+                                          oversize_pattern.data(), 2048),
+              -1);
+    EXPECT_EQ(apf_gen_get_insn_count(err_gen.get()), 0u);
+    const uint8_t dup_macs[12] = {
+        0x50, 0x6F, 0x9A, 0x01, 0x02, 0x03,
+        0x50, 0x6F, 0x9A, 0x01, 0x02, 0x03,
+    };
+    EXPECT_EQ(apf_gen_add_jbsne_at_offset_multi(err_gen.get(), 0, APF_LABEL_DROP, dup_macs, 2, 6),
+              -1);
+    EXPECT_EQ(apf_gen_add_jbsne_at_offset(err_gen.get(), 0x80000000u, APF_LABEL_DROP, target_mac,
+                                          sizeof(target_mac)),
+              -1);
+    EXPECT_EQ(apf_gen_get_insn_count(err_gen.get()), 0u);
+}
+
+TEST(ApfGeneratorTest, testApfV6AndV61ExtendedInstructions) {
+    auto gen = AllocGen();
+    ASSERT_NE(gen, nullptr);
+
+    // 1. JNSET / JNSET_R1 and multi-match JBSMATCH
+    const uint8_t multi_seqs[8] = {0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88};
+    apf_gen_add_jnset(gen.get(), 0x04, APF_LABEL_DROP);
+    apf_gen_add_jnset_r1(gen.get(), APF_LABEL_PASS);
+    apf_gen_add_jbsne_multi(gen.get(), APF_LABEL_DROP, multi_seqs, 2, 4);
+    apf_gen_add_jbseq_multi(gen.get(), APF_LABEL_PASS, multi_seqs, 2, 4);
+
+    // 2. JONEOF / JNONEOF (cnt=3, 2-byte elements: 0x0800, 0x0806, 0x86DD)
+    const uint32_t ethertypes[3] = {0x0800, 0x0806, 0x86DD};
+    apf_gen_add_joneof(gen.get(), APF_REG_R0, APF_LABEL_DROP, ethertypes, 3);
+    apf_gen_add_jnoneof(gen.get(), APF_REG_R1, APF_LABEL_PASS, ethertypes, 3);
+
+    // 3. JDNSQMATCH, JDNSAMATCH, JDNSQMATCH1, JDNSQMATCH2 (ne/eq & normal/safe)
+    const uint8_t dns_qname[] = {
+        0x02, 'a', 'a', 0x05, 'l', 'o', 'c', 'a', 'l', 0x00, 0x00,
+    };
+    apf_gen_add_jdnsqne(gen.get(), APF_LABEL_DROP, 12, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeq(gen.get(), APF_LABEL_PASS, 12, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqnesafe(gen.get(), APF_LABEL_DROP, 12, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeqsafe(gen.get(), APF_LABEL_PASS, 12, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsane(gen.get(), APF_LABEL_DROP, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsaeq(gen.get(), APF_LABEL_PASS, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsanesafe(gen.get(), APF_LABEL_DROP, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsaeqsafe(gen.get(), APF_LABEL_PASS, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqne1(gen.get(), APF_LABEL_DROP, 0x00FF, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeq1(gen.get(), APF_LABEL_PASS, 0x00FF, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqnesafe1(gen.get(), APF_LABEL_DROP, 0x00FF, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeqsafe1(gen.get(), APF_LABEL_PASS, 0x00FF, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqne2(gen.get(), APF_LABEL_DROP, 1, 28, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeq2(gen.get(), APF_LABEL_PASS, 1, 28, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqnesafe2(gen.get(), APF_LABEL_DROP, 1, 28, dns_qname, sizeof(dns_qname));
+    apf_gen_add_jdnsqeqsafe2(gen.get(), APF_LABEL_PASS, 1, 28, dns_qname, sizeof(dns_qname));
+
+    // 4. Counter PASS/DROP
+    apf_gen_add_cnt_and_pass(gen.get(), 7);
+    apf_gen_add_cnt_and_drop(gen.get(), 300);
+
+    size_t len = 0;
+    auto buf = GenerateProgram(gen.get(), &len);
+    ASSERT_NE(buf, nullptr);
+    EXPECT_EQ(len, apf_gen_get_program_len(gen.get()));
+    EXPECT_EQ(DisassembleProgram(buf.get(), len),
+              (std::vector<std::string>{
+                  "0: data        0,",
+                  "3: debugbuf    size=2584",
+                  "7: jnset       r0, 0x4, DROP",
+                  "12: jnset       r0, r1, PASS",
+                  "15: jbsne       r0, (4), DROP, { 11223344, 55667788 }[2]",
+                  "28: jbseq       r0, (4), PASS, { 11223344, 55667788 }[2]",
+                  "41: joneof      r0, DROP, { 2048, 2054, 34525 }",
+                  "53: jnoneof     r1, PASS, { 2048, 2054, 34525 }",
+                  "63: jdnsqne     r0, DROP, PTR, (2)AA(5)LOCAL(0)(0)",
+                  "78: jdnsqeq     r0, PASS, PTR, (2)AA(5)LOCAL(0)(0)",
+                  "93: jdnsqnesafe r0, DROP, PTR, (2)AA(5)LOCAL(0)(0)",
+                  "108: jdnsqeqsafe r0, PASS, PTR, (2)AA(5)LOCAL(0)(0)",
+                  "123: jdnsane     r0, DROP, (2)AA(5)LOCAL(0)(0)",
+                  "137: jdnsaeq     r0, PASS, (2)AA(5)LOCAL(0)(0)",
+                  "151: jdnsanesafe r0, DROP, (2)AA(5)LOCAL(0)(0)",
+                  "165: jdnsaeqsafe r0, PASS, (2)AA(5)LOCAL(0)(0)",
+                  "179: jdnsqne1    r0, DROP, 255, (2)AA(5)LOCAL(0)(0)",
+                  "195: jdnsqeq1    r0, PASS, 255, (2)AA(5)LOCAL(0)(0)",
+                  "211: jdnsqnesafe1r0, DROP, 255, (2)AA(5)LOCAL(0)(0)",
+                  "227: jdnsqeqsafe1r0, PASS, 255, (2)AA(5)LOCAL(0)(0)",
+                  "243: jdnsqne2    r0, DROP, A, AAAA, (2)AA(5)LOCAL(0)(0)",
+                  "259: jdnsqeq2    r0, PASS, A, AAAA, (2)AA(5)LOCAL(0)(0)",
+                  "275: jdnsqnesafe2r0, DROP, A, AAAA, (2)AA(5)LOCAL(0)(0)",
+                  "291: jdnsqeqsafe2r0, PASS, A, AAAA, (2)AA(5)LOCAL(0)(0)",
+                  "307: pass        counter=7",
+                  "309: drop        counter=300",
+              }));
+
+    // Calling builders with invalid arguments after generate() preserves ALREADY_GENERATED
+    EXPECT_EQ(apf_gen_add_joneof(gen.get(), APF_REG_R0, APF_LABEL_DROP, ethertypes, 1), -1);
+    EXPECT_EQ(apf_gen_get_error(gen.get(), nullptr), APF_GEN_ERR_ALREADY_GENERATED);
+
+    // 5. Boundary coverage for JONEOF (1-, 3-, 4-byte elements; cnt=2 and cnt=33),
+    //    JBSMATCH multi (cnt=32), and DNS name lists with 0xFF wildcard and multiple names
+    {
+        auto b_gen = AllocGen();
+        ASSERT_NE(b_gen, nullptr);
+        const uint32_t u8_set[2] = {6, 17};
+        const uint32_t u24_set[2] = {1, 0x010203};
+        const uint32_t u32_set[2] = {1, 0x01020304};
+        uint32_t max_set[33];
+        for (uint8_t i = 0; i < 33; i++) max_set[i] = i;
+        uint8_t seq32[32];
+        for (uint8_t i = 0; i < 32; i++) seq32[i] = i;
+        const uint8_t wildcard_multi_qnames[] = {
+            0xFF, 0x05, 'l', 'o', 'c', 'a', 'l', 0x00,
+            0x01, 'b',  0x05, 'l', 'o', 'c', 'a', 'l', 0x00, 0x00,
+        };
+        EXPECT_EQ(apf_gen_add_joneof(b_gen.get(), APF_REG_R0, APF_LABEL_DROP, u8_set, 2), 0);
+        EXPECT_EQ(apf_gen_add_joneof(b_gen.get(), APF_REG_R0, APF_LABEL_DROP, u24_set, 2), 0);
+        EXPECT_EQ(apf_gen_add_jnoneof(b_gen.get(), APF_REG_R1, APF_LABEL_PASS, u32_set, 2), 0);
+        EXPECT_EQ(apf_gen_add_joneof(b_gen.get(), APF_REG_R0, APF_LABEL_DROP, max_set, 33), 0);
+        EXPECT_EQ(apf_gen_add_jbsne_multi(b_gen.get(), APF_LABEL_DROP, seq32, 32, 1), 0);
+        EXPECT_EQ(apf_gen_add_jbseq_multi(b_gen.get(), APF_LABEL_PASS, seq32, 32, 1), 0);
+        EXPECT_EQ(apf_gen_add_jdnsqne(b_gen.get(), APF_LABEL_DROP, 12, wildcard_multi_qnames,
+                                      sizeof(wildcard_multi_qnames)),
+                  0);
+        size_t b_len = 0;
+        auto b_buf = GenerateProgram(b_gen.get(), &b_len);
+        ASSERT_NE(b_buf, nullptr);
+        EXPECT_EQ(
+            DisassembleProgram(b_buf.get(), b_len),
+            (std::vector<std::string>{
+                "0: data        0,",
+                "3: debugbuf    size=3904",
+                "7: joneof      r0, DROP, { 6, 17 }",
+                "13: joneof      r0, DROP, { 1, 66051 }",
+                "23: jnoneof     r1, PASS, { 1, 16909060 }",
+                "35: joneof      r0, DROP, { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, "
+                "15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 }",
+                "72: jbsne       r0, (1), DROP, { 00, 01, 02, 03, 04, 05, 06, 07, 08, 09, 0a, 0b, "
+                "0c, 0d, 0e, 0f, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 1a, 1b, 1c, 1d, 1e, 1f "
+                "}[32]",
+                "109: jbseq       r0, (1), PASS, { 00, 01, 02, 03, 04, 05, 06, 07, 08, 09, 0a, "
+                "0b, 0c, 0d, 0e, 0f, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 1a, 1b, 1c, 1d, 1e, "
+                "1f }[32]",
+                "146: jdnsqne     r0, DROP, PTR, (*)(5)LOCAL(0)(1)B(5)LOCAL(0)(0)",
+            }));
+    }
+
+    auto err_gen = AllocGen();
+    ASSERT_NE(err_gen, nullptr);
+    EXPECT_EQ(apf_gen_add_jset(err_gen.get(), 0, APF_LABEL_DROP), -1);
+    EXPECT_EQ(apf_gen_add_jnset(err_gen.get(), 0, APF_LABEL_DROP), -1);
+    EXPECT_EQ(apf_gen_add_jdnsqne2(err_gen.get(), APF_LABEL_DROP, 1, 1, dns_qname,
+                                   sizeof(dns_qname)),
+              -1);
+    EXPECT_EQ(apf_gen_add_joneof(err_gen.get(), APF_REG_R0, APF_LABEL_DROP, ethertypes, 1), -1);
+    EXPECT_EQ(apf_gen_add_jnoneof(err_gen.get(), APF_REG_R0, APF_LABEL_DROP, ethertypes, 34), -1);
+    uint8_t seq33[33] = {};
+    EXPECT_EQ(apf_gen_add_jbsne_multi(err_gen.get(), APF_LABEL_DROP, seq33, 33, 1), -1);
+    EXPECT_EQ(apf_gen_add_jbseq_multi(err_gen.get(), APF_LABEL_PASS, seq33, 33, 1), -1);
+    // Duplicate elements in JONEOF must be rejected (interpreter uses XOR toggle)
+    const uint32_t dup_values[2] = {0x0800, 0x0800};
+    EXPECT_EQ(apf_gen_add_joneof(err_gen.get(), APF_REG_R0, APF_LABEL_DROP, dup_values, 2), -1);
+    // Duplicate patterns in multi-sequence JBSMATCH must be rejected
+    const uint8_t dup_seqs[8] = {0x11, 0x22, 0x33, 0x44, 0x11, 0x22, 0x33, 0x44};
+    EXPECT_EQ(apf_gen_add_jbsne_multi(err_gen.get(), APF_LABEL_DROP, dup_seqs, 2, 4), -1);
+    // Malformed DNS name encodings must be rejected
+    const uint8_t bad_qname_short[] = {0x02, 'a', 'a', 0x00};
+    const uint8_t bad_qname_early_double_nul[] = {
+        0x01, 'a', 0x00, 0x00, 0x01, 'b', 0x00, 0x00,
+    };
+    const uint8_t bad_qname_truncated_label[] = {0x05, 'a', 'b', 0x00, 0x00};
+    const uint8_t bad_qname_nul_in_label[] = {0x02, 'a', 0x00, 0x00, 0x00};
+    const uint8_t bad_qname_trailing_wildcard[] = {0x01, 'a', 0x00, 0xFF, 0x00};
+    EXPECT_EQ(apf_gen_add_jdnsqne(err_gen.get(), APF_LABEL_DROP, 12, bad_qname_short,
+                                  sizeof(bad_qname_short)),
+              -1);
+    EXPECT_EQ(apf_gen_add_jdnsqne(err_gen.get(), APF_LABEL_DROP, 12, bad_qname_early_double_nul,
+                                  sizeof(bad_qname_early_double_nul)),
+              -1);
+    EXPECT_EQ(apf_gen_add_jdnsqne(err_gen.get(), APF_LABEL_DROP, 12, bad_qname_truncated_label,
+                                  sizeof(bad_qname_truncated_label)),
+              -1);
+    EXPECT_EQ(apf_gen_add_jdnsqne(err_gen.get(), APF_LABEL_DROP, 12, bad_qname_nul_in_label,
+                                  sizeof(bad_qname_nul_in_label)),
+              -1);
+    EXPECT_EQ(apf_gen_add_jdnsqne(err_gen.get(), APF_LABEL_DROP, 12, bad_qname_trailing_wildcard,
+                                  sizeof(bad_qname_trailing_wildcard)),
+              -1);
+    EXPECT_EQ(apf_gen_add_cnt_and_pass(err_gen.get(), 0), -1);
+    EXPECT_EQ(apf_gen_add_cnt_and_drop(err_gen.get(), 0), -1);
+    size_t err_len = 0;
+    EXPECT_EQ(GenerateProgram(err_gen.get(), &err_len), nullptr);
+}
+
+TEST(ApfGeneratorTest, testDataCopyAndDeduplication) {
+    // 1. Pre-populating initial JMPDATA at the start of the program works, and
+    //    calling apf_gen_set_data a second time or after another instruction fails
+    {
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        const uint8_t hdr[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+        EXPECT_EQ(apf_gen_set_data(gen.get(), hdr, sizeof(hdr)), 0);
+        EXPECT_EQ(apf_gen_set_data(gen.get(), hdr, sizeof(hdr)), -1);
+
+        auto gen2 = AllocGen();
+        ASSERT_NE(gen2, nullptr);
+        apf_gen_add_pass(gen2.get());
+        EXPECT_EQ(apf_gen_set_data(gen2.get(), hdr, sizeof(hdr)), -1);
+    }
+
+    // 2. Deduplicate overlapping/repeated slices (including against apf_gen_set_data bytes)
+    //    and emit DATACOPY with 3 + rel_ofs and boundary lengths (255, 256, 511)
+    {
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        const uint8_t hdr[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+        ASSERT_EQ(apf_gen_set_data(gen.get(), hdr, sizeof(hdr)), 0);
+        // Full slice matches pre-populated set_data bytes at JMPDATA offset 0 -> program offset 3
+        apf_gen_add_data_copy(gen.get(), hdr, sizeof(hdr));
+        // Sub-slice {0xBB, 0xCC, 0xDD} matches at unaligned JMPDATA offset 1 -> program offset 4
+        EXPECT_EQ(apf_gen_find_or_append_data(gen.get(), hdr + 1, 3), 4);
+        apf_gen_add_data_copy(gen.get(), hdr + 1, 3);
+
+        size_t len = 0;
+        auto buf = GenerateProgram(gen.get(), &len);
+        ASSERT_NE(buf, nullptr);
+        ASSERT_EQ(len, 19u);
+        EXPECT_EQ(DisassembleProgram(buf.get(), len),
+                  (std::vector<std::string>{
+                      "0: data        6, aabbccddeeff",
+                      "9: debugbuf    size=4053",
+                      "13: datacopy    src=3, (6)aabbccddeeff",
+                      "16: datacopy    src=4, (3)bbccdd",
+                  }));
+
+        auto dcopy_gen = AllocGen();
+        ASSERT_NE(dcopy_gen, nullptr);
+        const std::vector<uint8_t> pool511(511, 0x11);
+        ASSERT_EQ(apf_gen_set_data(dcopy_gen.get(), pool511.data(), pool511.size()), 0);
+        EXPECT_EQ(apf_gen_add_datacopy(dcopy_gen.get(), 3, 255), 0);
+        EXPECT_EQ(apf_gen_add_datacopy(dcopy_gen.get(), 3, 256), 0);
+        EXPECT_EQ(apf_gen_add_datacopy(dcopy_gen.get(), 3, 511), 0);
+        size_t dc_len = 0;
+        auto dc_buf = GenerateProgram(dcopy_gen.get(), &dc_len);
+        ASSERT_NE(dc_buf, nullptr);
+        std::vector<std::string> dc_disas = DisassembleProgram(dc_buf.get(), dc_len);
+        ASSERT_EQ(dc_disas.size(), 5u);
+        EXPECT_EQ(dc_disas[2], "518: datacopy    src=3, (255)" + std::string(255 * 2, '1'));
+        EXPECT_EQ(dc_disas[3], "521: datacopy    src=3, (256)" + std::string(256 * 2, '1'));
+        EXPECT_EQ(dc_disas[4], "525: datacopy    src=3, (511)" + std::string(511 * 2, '1'));
+    }
+
+    // 3. Multi-chunk splitting boundary: 511 bytes (1 instruction) vs 512 bytes (511 + 1),
+    //    and 600 bytes (511 + 89)
+    {
+        auto gen511 = AllocGen();
+        ASSERT_NE(gen511, nullptr);
+        const std::vector<uint8_t> p511(511, 0x42);
+        EXPECT_EQ(apf_gen_add_data_copy(gen511.get(), p511.data(), p511.size()), 0);
+        EXPECT_EQ(apf_gen_get_insn_count(gen511.get()), 1u);
+
+        auto gen512 = AllocGen();
+        ASSERT_NE(gen512, nullptr);
+        std::vector<uint8_t> p512(512, 0x44);
+        p512[511] = 0x99;
+        EXPECT_EQ(apf_gen_add_data_copy(gen512.get(), p512.data(), p512.size()), 0);
+        EXPECT_EQ(apf_gen_get_insn_count(gen512.get()), 2u);
+        size_t len512 = 0;
+        auto buf512 = GenerateProgram(gen512.get(), &len512);
+        ASSERT_NE(buf512, nullptr);
+        std::vector<std::string> disas512 = DisassembleProgram(buf512.get(), len512);
+        ASSERT_EQ(disas512.size(), 4u);
+        EXPECT_EQ(disas512[2], "519: datacopy    src=3, (511)" + std::string(511 * 2, '4'));
+        EXPECT_EQ(disas512[3], "523: datacopy    src=514, (1)99");
+
+        auto gen = AllocGen();
+        ASSERT_NE(gen, nullptr);
+        uint8_t large_payload[600];
+        for (size_t i = 0; i < sizeof(large_payload); i++) {
+            large_payload[i] = (i < 511) ? static_cast<uint8_t>(i & 0x7f) : 0xAA;
+        }
+        apf_gen_add_data_copy(gen.get(), large_payload, sizeof(large_payload));
+        EXPECT_EQ(apf_gen_get_insn_count(gen.get()), 2u);
+        size_t len = 0;
+        auto buf = GenerateProgram(gen.get(), &len);
+        ASSERT_NE(buf, nullptr);
+        ASSERT_EQ(len, 615u);
+        std::vector<std::string> disas = DisassembleProgram(buf.get(), len);
+        ASSERT_EQ(disas.size(), 4u);
+        EXPECT_EQ(disas[1], "603: debugbuf    size=3457");
+        EXPECT_EQ(disas[3], "611: datacopy    src=514, (89)" + std::string(89 * 2, 'a'));
+    }
+
+    // 4. Multi-chunk rollback on JMPDATA overflow preserves insn count and err_insn_index,
+    //    and calling apf_gen_set_data() after a failed 70000-byte data_copy does not leak memory
+    {
+        auto gen = AllocGen(APF_VERSION_61, 131072);
+        ASSERT_NE(gen, nullptr);
+        const std::vector<uint8_t> init_pool(65000, 0x11);
+        ASSERT_EQ(apf_gen_set_data(gen.get(), init_pool.data(), init_pool.size()), 0);
+        ASSERT_EQ(apf_gen_add_pass(gen.get()), 0);
+        // Chunk 1 (511 bytes of 0x22) fits in 65511 <= 65535, but chunk 2 (89 bytes of 0x33)
+        // overflows 65535; both JMPDATA and the emitted chunk-1 instruction must roll back.
+        std::vector<uint8_t> overflow_payload(600, 0x22);
+        for (size_t i = 511; i < overflow_payload.size(); i++) {
+            overflow_payload[i] = 0x33;
+        }
+        EXPECT_EQ(apf_gen_add_data_copy(gen.get(), overflow_payload.data(),
+                                        overflow_payload.size()),
+                  -1);
+        EXPECT_EQ(apf_gen_get_insn_count(gen.get()), 1u);
+        size_t err_idx = 99;
+        EXPECT_EQ(apf_gen_get_error(gen.get(), &err_idx), APF_GEN_ERR_DATA_OVERFLOW);
+        EXPECT_EQ(err_idx, 1u);
+
+        auto leak_gen = AllocGen(APF_VERSION_61, 131072);
+        ASSERT_NE(leak_gen, nullptr);
+        std::vector<uint8_t> huge_payload(70000);
+        for (size_t i = 0; i < huge_payload.size(); i++) {
+            huge_payload[i] = static_cast<uint8_t>((i / 511) + 1);
+        }
+        EXPECT_EQ(apf_gen_add_data_copy(leak_gen.get(), huge_payload.data(), huge_payload.size()),
+                  -1);
+        EXPECT_EQ(apf_gen_get_error(leak_gen.get(), nullptr), APF_GEN_ERR_DATA_OVERFLOW);
+        const uint8_t small_data[4] = {0xDE, 0xAD, 0xBE, 0xEF};
+        EXPECT_EQ(apf_gen_set_data(leak_gen.get(), small_data, sizeof(small_data)), 0);
+    }
+}
+
 TEST(ApfGeneratorTest, testBranchLabelsAndTerminalTargets) {
     // 1. User-defined allocated labels + iterative branch shrinking
     {
@@ -1737,6 +2344,7 @@ TEST(ApfGeneratorTest, testRamModelErrorReportingAndCallerBuffer) {
         EXPECT_EQ(out_len, 8u);
 
         // Adding instructions or labels after the program has been written is forbidden
+        EXPECT_EQ(apf_gen_add_div(gen.get(), APF_REG_R0, 0), -1);
         EXPECT_EQ(apf_gen_add_drop(gen.get()), -1);
         EXPECT_EQ(apf_gen_alloc_label(gen.get()).id, APF_LABEL_INVALID.id);
         EXPECT_EQ(apf_gen_get_error(gen.get(), nullptr), APF_GEN_ERR_ALREADY_GENERATED);
