@@ -139,7 +139,9 @@ extern "C" {
 #endif
 
 /**
- * This is the total amount of ram available for apf_state's.  This must be at least 8192.
+ * This is the total amount of ram available for apf_state's.  This must be:
+ *  - at least 8192,
+ *  - a multiple of APF_MEMORY_ALLOCATION_GRANULARITY.
  * The total sum of all outstanding apf_allocate_state() calls will never exceed this value.
  * (Note: this memory does not include ingress/egress packet buffers)
  */
