@@ -103,7 +103,7 @@ APF_STATIC_ASSERT(!(APF_MEMORY_ALLOCATION_GRANULARITY % offsetof(struct apf_ptr_
 #include "apf_dns.h"
 #include "apf_checksum.h"
 
-#define APF_VERSION 20261110
+#define APF_VERSION 20261116
 
 // User hook for interpreter debug tracing.
 #ifdef APF_TRACE_HOOK
@@ -174,6 +174,7 @@ typedef struct {
     u32 R[2];          // Register values.
     memory_type mem;   // Memory slot values.  (array of u32s)
     // Note: any extra u16s go here, then u8s
+    u8 tx_to_host;     // tx_buf is for the host (ALLOCATE_RX), not for transmit
 } apf_context;
 
 void apf_get_info(struct apf_info *info) {
@@ -456,9 +457,12 @@ bool apf_process_timer_event(void) {
 FOR_KERNEL(apf_process_timer_event)
 
 static inline int do_transmit_buffer(apf_context *ctx, u32 pkt_len, u8 dscp) {
-    int ret = apf_transmit_tx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp, UNICAST_RETURN);
+    int ret = ctx->tx_to_host
+            ? apf_transmit_rx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp)
+            : apf_transmit_tx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp, UNICAST_RETURN);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;
+    ctx->tx_to_host = 0;
     return ret;
 }
 
@@ -749,6 +753,7 @@ static int do_apf_run(apf_context *ctx) {
                 break;
               }
               case ALLOCATE_EXT_OPCODE:
+              case ALLOCATE_RX_EXT_OPCODE:
               do_allocate:
                 ASSERT_RETURN(ctx->tx_buf == NULL);
                 if (opcode == ALLOC_XMIT_OPCODE) {
@@ -760,9 +765,14 @@ static int do_apf_run(apf_context *ctx) {
                 }
                 // checksumming functions require minimum 274 byte buffer for correctness
                 if (ctx->tx_buf_len < 274) ctx->tx_buf_len = 274;
-                ctx->tx_buf = apf_allocate_tx_buffer(ctx->caller_ctx, ctx->tx_buf_len);
+                // ALLOC_XMIT reaches here with its own imm, so check the opcode too.
+                ctx->tx_to_host = (opcode != ALLOC_XMIT_OPCODE && imm == ALLOCATE_RX_EXT_OPCODE);
+                ctx->tx_buf = ctx->tx_to_host
+                        ? apf_allocate_rx_buffer(ctx->caller_ctx, ctx->tx_buf_len)
+                        : apf_allocate_tx_buffer(ctx->caller_ctx, ctx->tx_buf_len);
                 if (!ctx->tx_buf) {  // allocate failure
                     ctx->tx_buf_len = 0;
+                    ctx->tx_to_host = 0;
                     counter[-3]++;
                     return EXCEPTION;
                 }

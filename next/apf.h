@@ -375,7 +375,20 @@ typedef union {
  */
 #define EXCEPTIONBUFFER_EXT_OPCODE 48
 
-// Note: 51, 53, 55, 57 used up above for DNS matching
+// Note: 51, 53, 55, 57 used up above for DNS matching. 52, 54, 56, 58 are kept for future 'A'
+// variety DNS matching: the JDNS opcodes are 43 plus flag bits (see the JDNS*MATCH decode).
+
+/* APFv8: Allocate a writable output buffer, like ALLOCATE, but for a packet to the host:
+ * the buffer comes from apf_allocate_rx_buffer(), and TRANSMIT (or the transmit form of
+ * ALLOC_XMIT) hands it to apf_transmit_rx_buffer(), which injects it into the host's receive
+ * path as if it was received on this interface. Filling the buffer and the checksum options
+ * work as for a transmitted packet.
+ * R=0: register R0 specifies the length
+ * R=1: length provided in u16 imm2
+ * e.g. "allocate_rx R0" or "allocate_rx 54"
+ * On failure automatically executes 'pass 3'
+ */
+#define ALLOCATE_RX_EXT_OPCODE 59
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
