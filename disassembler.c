@@ -375,7 +375,8 @@ disas_ret apf_disassemble(const uint8_t* program, uint32_t program_len, uint32_t
                     bprintf("r%d, r%d", reg_num, reg_num ^ 1);
                     break;
                 case ALLOCATE_EXT_OPCODE:
-                    print_opcode("allocate");
+                case ALLOCATE_RX_EXT_OPCODE:
+                    print_opcode(imm == ALLOCATE_RX_EXT_OPCODE ? "allocate_rx" : "allocate");
                     if (reg_num == 0) {
                         bprintf("r%d", reg_num);
                     } else {

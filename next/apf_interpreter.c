@@ -502,7 +502,20 @@ typedef union {
  */
 #define EXCEPTIONBUFFER_EXT_OPCODE 48
 
-// Note: 51, 53, 55, 57 used up above for DNS matching
+// Note: 51, 53, 55, 57 used up above for DNS matching. 52, 54, 56, 58 are kept for future 'A'
+// variety DNS matching: the JDNS opcodes are 43 plus flag bits (see the JDNS*MATCH decode).
+
+/* APFv8: Allocate a writable output buffer, like ALLOCATE, but for a packet to the host:
+ * the buffer comes from apf_allocate_rx_buffer(), and TRANSMIT (or the transmit form of
+ * ALLOC_XMIT) hands it to apf_transmit_rx_buffer(), which injects it into the host's receive
+ * path as if it was received on this interface. Filling the buffer and the checksum options
+ * work as for a transmitted packet.
+ * R=0: register R0 specifies the length
+ * R=1: length provided in u16 imm2
+ * e.g. "allocate_rx R0" or "allocate_rx 54"
+ * On failure automatically executes 'pass 3'
+ */
+#define ALLOCATE_RX_EXT_OPCODE 59
 
 // This extended opcode is used to implement PKTDATACOPY_OPCODE
 #define PKTDATACOPYIMM_EXT_OPCODE 65536
@@ -750,7 +763,7 @@ static int csum_and_return_dscp(u8* const pkt,
 }
 // End include of apf_checksum.h
 
-#define APF_VERSION 20261110
+#define APF_VERSION 20261116
 
 // User hook for interpreter debug tracing.
 #ifdef APF_TRACE_HOOK
@@ -821,6 +834,7 @@ typedef struct {
     u32 R[2];          // Register values.
     memory_type mem;   // Memory slot values.  (array of u32s)
     // Note: any extra u16s go here, then u8s
+    u8 tx_to_host;     // tx_buf is for the host (ALLOCATE_RX), not for transmit
 } apf_context;
 
 void apf_get_info(struct apf_info *info) {
@@ -1103,9 +1117,12 @@ bool apf_process_timer_event(void) {
 FOR_KERNEL(apf_process_timer_event)
 
 static inline int do_transmit_buffer(apf_context *ctx, u32 pkt_len, u8 dscp) {
-    int ret = apf_transmit_tx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp, UNICAST_RETURN);
+    int ret = ctx->tx_to_host
+            ? apf_transmit_rx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp)
+            : apf_transmit_tx_buffer(ctx->caller_ctx, ctx->tx_buf, pkt_len, dscp, UNICAST_RETURN);
     ctx->tx_buf = NULL;
     ctx->tx_buf_len = 0;
+    ctx->tx_to_host = 0;
     return ret;
 }
 
@@ -1396,6 +1413,7 @@ static int do_apf_run(apf_context *ctx) {
                 break;
               }
               case ALLOCATE_EXT_OPCODE:
+              case ALLOCATE_RX_EXT_OPCODE:
               do_allocate:
                 ASSERT_RETURN(ctx->tx_buf == NULL);
                 if (opcode == ALLOC_XMIT_OPCODE) {
@@ -1407,9 +1425,14 @@ static int do_apf_run(apf_context *ctx) {
                 }
                 // checksumming functions require minimum 274 byte buffer for correctness
                 if (ctx->tx_buf_len < 274) ctx->tx_buf_len = 274;
-                ctx->tx_buf = apf_allocate_tx_buffer(ctx->caller_ctx, ctx->tx_buf_len);
+                // ALLOC_XMIT reaches here with its own imm, so check the opcode too.
+                ctx->tx_to_host = (opcode != ALLOC_XMIT_OPCODE && imm == ALLOCATE_RX_EXT_OPCODE);
+                ctx->tx_buf = ctx->tx_to_host
+                        ? apf_allocate_rx_buffer(ctx->caller_ctx, ctx->tx_buf_len)
+                        : apf_allocate_tx_buffer(ctx->caller_ctx, ctx->tx_buf_len);
                 if (!ctx->tx_buf) {  // allocate failure
                     ctx->tx_buf_len = 0;
+                    ctx->tx_to_host = 0;
                     counter[-3]++;
                     return EXCEPTION;
                 }
