@@ -2,7 +2,7 @@
  * apf_tool_nl80211.c
  *
  * The nl80211 counterpart of apf_tool.c: same commands and net-apf attributes,
- * sent as Google OUI vendor commands (0x1810 - 0x1817) with the attributes
+ * sent as Android OUI vendor commands (subcmds 4 - 11) with the attributes
  * nested in NL80211_ATTR_VENDOR_DATA. The target is an interface name, or
  * wdev:<id> (from `iw dev`) to reach netdev-less wdevs such as a NAN NMI.
  */
@@ -103,7 +103,7 @@ static struct nl_msg *alloc_apf_msg(int family_id, uint32_t subcmd, int flags,
         nla_put_u32(msg, NL80211_ATTR_IFINDEX, if_index);
     else
         nla_put_u64(msg, NL80211_ATTR_WDEV, wdev_id);
-    nla_put_u32(msg, NL80211_ATTR_VENDOR_ID, OUI_GOOGLE);
+    nla_put_u32(msg, NL80211_ATTR_VENDOR_ID, ANDROID_OUI);
     nla_put_u32(msg, NL80211_ATTR_VENDOR_SUBCMD, subcmd);
     if (vendor_data)
         *vendor_data = nla_nest_start(msg, NL80211_ATTR_VENDOR_DATA);
@@ -256,7 +256,7 @@ int main(int argc, char **argv) {
     struct nlattr *vendor_data;
 
     if (strcmp(command, "get_info") == 0) {
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_GET_INFO, 0, NULL);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_GET_INFO, 0, NULL);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, parse_get_info_reply, NULL);
@@ -271,7 +271,7 @@ int main(int argc, char **argv) {
         }
         uint32_t id = (uint32_t)strtoul(argv[3], NULL, 0);
 
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_SET_ID, NLM_F_ACK, &vendor_data);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_SET_ID, NLM_F_ACK, &vendor_data);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nla_put_u32(msg, NET_APF_A_INFO_CHIP_ID, id);
@@ -296,7 +296,7 @@ int main(int argc, char **argv) {
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_ENABLE, NLM_F_ACK, &vendor_data);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_ENABLE, NLM_F_ACK, &vendor_data);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nla_put_u32(msg, NET_APF_A_RAM_SIZE, ram_size);
@@ -310,7 +310,7 @@ int main(int argc, char **argv) {
         }
 
     } else if (strcmp(command, "get_ram_size") == 0) {
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_GET_RAM_SIZE, 0, NULL);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_GET_RAM_SIZE, 0, NULL);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nl_socket_modify_cb(sock, NL_CB_VALID, NL_CB_CUSTOM, parse_get_ram_size_reply, NULL);
@@ -328,7 +328,7 @@ int main(int argc, char **argv) {
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_READ, 0, &vendor_data);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_READ, 0, &vendor_data);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         if (argc >= 4) nla_put_u32(msg, NET_APF_A_OFFSET, offset);
@@ -357,7 +357,7 @@ int main(int argc, char **argv) {
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_WRITE, NLM_F_ACK, &vendor_data);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_WRITE, NLM_F_ACK, &vendor_data);
         if (!msg) { free(data_bytes); ret = -ENOMEM; goto cleanup_sock; }
 
         nla_put(msg, NET_APF_A_DATA, data_len, data_bytes);
@@ -373,7 +373,7 @@ int main(int argc, char **argv) {
         }
 
     } else if (strcmp(command, "disable") == 0) {
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_DISABLE, NLM_F_ACK, NULL);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_DISABLE, NLM_F_ACK, NULL);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         ret = send_and_recv(sock, msg);
@@ -395,7 +395,7 @@ int main(int argc, char **argv) {
             ret = -1; goto cleanup_sock;
         }
 
-        msg = alloc_apf_msg(family_id, GOOGLE_NL80211_SUBCMD_APF_SET_FAST_PATH, NLM_F_ACK, &vendor_data);
+        msg = alloc_apf_msg(family_id, ANDROID_NL80211_SUBCMD_APF_SET_FAST_PATH, NLM_F_ACK, &vendor_data);
         if (!msg) { ret = -ENOMEM; goto cleanup_sock; }
 
         nla_put(msg, NET_APF_A_FP_UCAST_MAC, ETH_ALEN, mac);

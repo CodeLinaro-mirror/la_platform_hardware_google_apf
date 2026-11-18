@@ -19,19 +19,21 @@
 
 #include "net_apf.h"
 
-#define OUI_GOOGLE 0x001A11
+/* Android vendor commands, defined in the master copy
+ * external/wpa_supplicant_8/wpa_supplicant/aidl/android_vendor.h. The APF
+ * subcommands carry the net-apf attributes: each attribute ID there
+ * (APF_ATTR_*) is the same as NET_APF_A_*. */
+#define ANDROID_OUI 0xF4F5E8
 
-/* APF nl80211 vendor subcommands, 1:1 with enum net_apf_cmd. Must match
- * enum google_nl80211_apf_subcmds in the kernel driver. */
-enum google_nl80211_apf_subcmds {
-	GOOGLE_NL80211_SUBCMD_APF_GET_INFO	= 0x1810,
-	GOOGLE_NL80211_SUBCMD_APF_SET_ID	= 0x1811,
-	GOOGLE_NL80211_SUBCMD_APF_ENABLE	= 0x1812,
-	GOOGLE_NL80211_SUBCMD_APF_GET_RAM_SIZE	= 0x1813,
-	GOOGLE_NL80211_SUBCMD_APF_READ		= 0x1814,
-	GOOGLE_NL80211_SUBCMD_APF_WRITE		= 0x1815,
-	GOOGLE_NL80211_SUBCMD_APF_DISABLE	= 0x1816,
-	GOOGLE_NL80211_SUBCMD_APF_SET_FAST_PATH	= 0x1817,
+enum android_nl80211_apf_subcmds {
+	ANDROID_NL80211_SUBCMD_APF_GET_INFO	= 4,
+	ANDROID_NL80211_SUBCMD_APF_SET_ID	= 5,
+	ANDROID_NL80211_SUBCMD_APF_ENABLE	= 6,
+	ANDROID_NL80211_SUBCMD_APF_GET_RAM_SIZE	= 7,
+	ANDROID_NL80211_SUBCMD_APF_READ		= 8,
+	ANDROID_NL80211_SUBCMD_APF_WRITE	= 9,
+	ANDROID_NL80211_SUBCMD_APF_DISABLE	= 10,
+	ANDROID_NL80211_SUBCMD_APF_SET_FAST_PATH = 11,
 };
 
 #endif /* NL_APF_NL80211_H */
